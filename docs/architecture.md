@@ -144,9 +144,9 @@ This allows the main binary to include only needed adapters via imports:
 ```go
 // cmd/claude-sync/main.go
 import (
-    _ "github.com/tawanorg/claude-sync/internal/storage/gcs"
-    _ "github.com/tawanorg/claude-sync/internal/storage/r2"
-    _ "github.com/tawanorg/claude-sync/internal/storage/s3"
+    _ "github.com/leog/claude-sync-profiles/internal/storage/gcs"
+    _ "github.com/leog/claude-sync-profiles/internal/storage/r2"
+    _ "github.com/leog/claude-sync-profiles/internal/storage/s3"
 )
 ```
 

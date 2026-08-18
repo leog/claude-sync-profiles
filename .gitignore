@@ -44,3 +44,4 @@ Thumbs.db
 .npmrc
 .env
 .env.*
+bin/checksums.txt

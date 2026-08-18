@@ -3,7 +3,7 @@ package main
 import (
 	"testing"
 
-	"github.com/tawanorg/claude-sync/internal/config"
+	"github.com/leog/claude-sync-profiles/internal/config"
 )
 
 // TestResolveScope covers the non-interactive branches of resolveScope: explicit

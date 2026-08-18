@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tawanorg/claude-sync/internal/storage"
+	"github.com/leog/claude-sync-profiles/internal/storage"
 )
 
 func TestScopedSyncPaths(t *testing.T) {

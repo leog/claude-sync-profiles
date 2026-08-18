@@ -14,14 +14,14 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/tawanorg/claude-sync/internal/config"
-	"github.com/tawanorg/claude-sync/internal/crypto"
-	"github.com/tawanorg/claude-sync/internal/storage"
+	"github.com/leog/claude-sync-profiles/internal/config"
+	"github.com/leog/claude-sync-profiles/internal/crypto"
+	"github.com/leog/claude-sync-profiles/internal/storage"
 
 	// Register storage adapters
-	_ "github.com/tawanorg/claude-sync/internal/storage/gcs"
-	_ "github.com/tawanorg/claude-sync/internal/storage/r2"
-	_ "github.com/tawanorg/claude-sync/internal/storage/s3"
+	_ "github.com/leog/claude-sync-profiles/internal/storage/gcs"
+	_ "github.com/leog/claude-sync-profiles/internal/storage/r2"
+	_ "github.com/leog/claude-sync-profiles/internal/storage/s3"
 )
 
 const defaultWorkers = 10
@@ -97,11 +97,9 @@ func NewSyncer(cfg *config.Config, quiet bool) (*Syncer, error) {
 		return nil, fmt.Errorf("failed to load state: %w", err)
 	}
 
-	// Use overridden claude dir if provided, otherwise use default
-	claudeDir := config.ClaudeDir()
-	if cfg.ClaudeDirOverride != "" {
-		claudeDir = cfg.ClaudeDirOverride
-	}
+	// Resolve the Claude directory: test override, then the profile's
+	// configured claude_dir, then the default ~/.claude.
+	claudeDir := cfg.ResolveClaudeDir()
 
 	homeDir, _ := os.UserHomeDir()
 	mapper, err := NewPathMapper(homeDir, cfg.PathMap)
@@ -166,6 +164,11 @@ func (s *Syncer) Scope() string {
 // overwrite rather than recomputing it from scope alone.
 func (s *Syncer) SyncPaths() []string {
 	return s.syncPaths()
+}
+
+// ClaudeDir returns the local Claude directory this syncer reads and writes.
+func (s *Syncer) ClaudeDir() string {
+	return s.claudeDir
 }
 
 func (s *Syncer) log(format string, args ...interface{}) {
@@ -860,12 +863,10 @@ func (s *Syncer) Diff(ctx context.Context) ([]DiffEntry, error) {
 	return entries, nil
 }
 
-// claudeJSONPath returns the path to ~/.claude.json, respecting test overrides.
+// claudeJSONPath returns the path of the .claude.json file for this syncer's
+// Claude directory, respecting test overrides.
 func (s *Syncer) claudeJSONPath() string {
-	if s.cfg.ClaudeJSONOverride != "" {
-		return s.cfg.ClaudeJSONOverride
-	}
-	return config.ClaudeJSONPath()
+	return s.cfg.ResolveClaudeJSONPath()
 }
 
 // PushMCP reads local MCP server configs, normalizes paths, and uploads them.

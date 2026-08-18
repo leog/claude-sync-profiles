@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tawanorg/claude-sync/internal/config"
+	"github.com/leog/claude-sync-profiles/internal/config"
 )
 
 type FileState struct {
@@ -39,7 +39,16 @@ type SyncState struct {
 }
 
 func LoadState() (*SyncState, error) {
-	return loadStateFromPath(config.StateFilePath())
+	// Pin the save path at load time so the state always writes back to the
+	// profile it was loaded from, even if the active profile changes later
+	// (e.g. while iterating profiles for --all-profiles).
+	statePath := config.StateFilePath()
+	state, err := loadStateFromPath(statePath)
+	if err != nil {
+		return nil, err
+	}
+	state.savePath = statePath
+	return state, nil
 }
 
 // LoadStateFromDir loads state from a custom directory (for testing)

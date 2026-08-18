@@ -20,24 +20,25 @@ import (
 	"github.com/AlecAivazis/survey/v2"
 	"github.com/spf13/cobra"
 
-	"github.com/tawanorg/claude-sync/internal/claudesettings"
-	"github.com/tawanorg/claude-sync/internal/config"
-	"github.com/tawanorg/claude-sync/internal/crypto"
-	"github.com/tawanorg/claude-sync/internal/paths"
-	"github.com/tawanorg/claude-sync/internal/storage"
-	"github.com/tawanorg/claude-sync/internal/sync"
-	"github.com/tawanorg/claude-sync/internal/util"
+	"github.com/leog/claude-sync-profiles/internal/claudesettings"
+	"github.com/leog/claude-sync-profiles/internal/config"
+	"github.com/leog/claude-sync-profiles/internal/crypto"
+	"github.com/leog/claude-sync-profiles/internal/paths"
+	"github.com/leog/claude-sync-profiles/internal/storage"
+	"github.com/leog/claude-sync-profiles/internal/sync"
+	"github.com/leog/claude-sync-profiles/internal/util"
 
 	// Register storage adapters
-	_ "github.com/tawanorg/claude-sync/internal/storage/gcs"
-	_ "github.com/tawanorg/claude-sync/internal/storage/r2"
-	_ "github.com/tawanorg/claude-sync/internal/storage/s3"
-	_ "github.com/tawanorg/claude-sync/internal/storage/webdav"
+	_ "github.com/leog/claude-sync-profiles/internal/storage/gcs"
+	_ "github.com/leog/claude-sync-profiles/internal/storage/r2"
+	_ "github.com/leog/claude-sync-profiles/internal/storage/s3"
+	_ "github.com/leog/claude-sync-profiles/internal/storage/webdav"
 )
 
 var (
 	version = "dev" // Set via ldflags at build time: -ldflags "-X main.version=x.x.x"
 	quiet   bool
+	profile string
 )
 
 // ANSI color codes
@@ -52,13 +53,27 @@ const (
 
 func main() {
 	rootCmd := &cobra.Command{
-		Use:     "claude-sync",
-		Short:   "Sync Claude Code sessions across devices",
-		Long:    `A CLI tool to sync your ~/.claude directory across devices using cloud storage with encryption.`,
+		Use:   "claude-sync",
+		Short: "Sync Claude Code sessions across devices",
+		Long: `A CLI tool to sync your ~/.claude directory across devices using cloud storage with encryption.
+
+Multiple Claude accounts on one machine are supported via profiles: each
+profile has its own storage config, encryption key, sync state, and Claude
+directory (claude_dir). Select one with --profile <name> or the
+CLAUDE_SYNC_PROFILE environment variable; without either, the default
+profile (~/.claude-sync, syncing ~/.claude) is used.`,
 		Version: version,
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			name := profile
+			if name == "" {
+				name = os.Getenv(config.ProfileEnvVar)
+			}
+			return config.SetActiveProfile(name)
+		},
 	}
 
 	rootCmd.PersistentFlags().BoolVarP(&quiet, "quiet", "q", false, "Suppress output")
+	rootCmd.PersistentFlags().StringVarP(&profile, "profile", "p", "", "Profile to use (multi-account); defaults to $"+config.ProfileEnvVar+" or the default profile")
 
 	rootCmd.AddCommand(
 		initCmd(),
@@ -75,6 +90,7 @@ func main() {
 		mcpCmd(),
 		autoCmd(),
 		pathsCmd(),
+		profilesCmd(),
 	)
 
 	if err := rootCmd.Execute(); err != nil {
@@ -98,7 +114,7 @@ func printBanner() {
 	fmt.Printf("%s\n", colorReset)
 
 	fmt.Printf("  %sSync your Claude Code sessions across all your devices.%s\n", colorDim, colorReset)
-	fmt.Printf("  %sIssues & PRs welcome: %shttps://github.com/tawanorg/claude-sync%s\n", colorDim, colorCyan, colorReset)
+	fmt.Printf("  %sIssues & PRs welcome: %shttps://github.com/leog/claude-sync-profiles%s\n", colorDim, colorCyan, colorReset)
 	fmt.Println()
 }
 
@@ -121,6 +137,7 @@ func printWarning(text string) {
 func initCmd() *cobra.Command {
 	var provider, bucket string
 	var scope string
+	var claudeDir, remotePrefix string
 	var usePassphrase, force bool
 
 	// R2 flags
@@ -155,7 +172,11 @@ Examples:
   claude-sync init                # Full setup wizard
   claude-sync init --passphrase   # Re-enter passphrase only (keeps storage config)
   claude-sync init --force        # Reset everything, start fresh
-  claude-sync init --provider s3-compatible --endpoint https://s3.us-west-004.backblazeb2.com   # Backblaze B2`,
+  claude-sync init --provider s3-compatible --endpoint https://s3.us-west-004.backblazeb2.com   # Backblaze B2
+
+Multi-account: combine with the global --profile flag to set up a second
+account with its own Claude directory, e.g.:
+  claude-sync --profile personal init --claude-dir ~/.claude-personal`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Show banner
 			printBanner()
@@ -169,7 +190,7 @@ Examples:
 			}
 
 			// Normal flow: full setup
-			return initFullSetup(ctx, keyPath, provider, bucket, accountID, accessKey, secretKey, s3Region, s3Endpoint, s3UsePathStyle, gcsProjectID, gcsCredentialsFile, webdavURL, webdavUsername, webdavPassword, webdavPathPrefix, scope, usePassphrase, force)
+			return initFullSetup(ctx, keyPath, provider, bucket, accountID, accessKey, secretKey, s3Region, s3Endpoint, s3UsePathStyle, gcsProjectID, gcsCredentialsFile, webdavURL, webdavUsername, webdavPassword, webdavPathPrefix, scope, claudeDir, remotePrefix, usePassphrase, force)
 		},
 	}
 
@@ -179,6 +200,8 @@ Examples:
 	cmd.Flags().StringVar(&bucket, "bucket", "", "Bucket name")
 	cmd.Flags().BoolVar(&usePassphrase, "passphrase", false, "Derive encryption key from passphrase")
 	cmd.Flags().BoolVarP(&force, "force", "f", false, "Overwrite existing config/key without prompting")
+	cmd.Flags().StringVar(&claudeDir, "claude-dir", "", "Claude config directory to sync (default ~/.claude); use with --profile for secondary accounts, e.g. ~/.claude-personal")
+	cmd.Flags().StringVar(&remotePrefix, "remote-prefix", "", "Remote key prefix inside the bucket (lets multiple profiles share one bucket)")
 
 	// R2 flags
 	cmd.Flags().StringVar(&accountID, "account-id", "", "Cloudflare Account ID (R2)")
@@ -275,7 +298,11 @@ func resolveScope(scope string) (string, error) {
 }
 
 // initFullSetup handles the full init wizard
-func initFullSetup(ctx context.Context, keyPath, provider, bucket, accountID, accessKey, secretKey, s3Region, s3Endpoint string, s3UsePathStyle bool, gcsProjectID, gcsCredentialsFile, webdavURL, webdavUsername, webdavPassword, webdavPathPrefix, scope string, usePassphrase, force bool) error {
+func initFullSetup(ctx context.Context, keyPath, provider, bucket, accountID, accessKey, secretKey, s3Region, s3Endpoint string, s3UsePathStyle bool, gcsProjectID, gcsCredentialsFile, webdavURL, webdavUsername, webdavPassword, webdavPathPrefix, scope, claudeDir, remotePrefix string, usePassphrase, force bool) error {
+	if p := config.ActiveProfile(); p != "" {
+		fmt.Printf("  %sSetting up profile:%s %s%s%s\n\n", colorDim, colorReset, colorBold, p, colorReset)
+	}
+
 	if config.Exists() && !force {
 		var overwrite bool
 		prompt := &survey.Confirm{
@@ -347,6 +374,25 @@ func initFullSetup(ctx context.Context, keyPath, provider, bucket, accountID, ac
 	if storageCfg == nil {
 		return fmt.Errorf("setup cancelled")
 	}
+
+	// Remote key prefix: namespaces this profile's files inside the bucket so
+	// multiple profiles (accounts) can share one bucket without colliding.
+	// Prompted only for named profiles; the default profile keeps the
+	// historical root layout unless --remote-prefix is given.
+	remotePrefix = strings.Trim(remotePrefix, "/")
+	if remotePrefix == "" && config.ActiveProfile() != "" {
+		fmt.Println()
+		prompt := &survey.Input{
+			Message: "Remote key prefix (namespace inside the bucket):",
+			Default: config.ActiveProfile(),
+			Help:    "Keeps this profile's files separate when profiles share a bucket. Use the SAME prefix for this profile on all devices. Leave empty to store at the bucket root.",
+		}
+		if err := survey.AskOne(prompt, &remotePrefix); err != nil {
+			return err
+		}
+		remotePrefix = strings.Trim(remotePrefix, "/")
+	}
+	storageCfg.Prefix = remotePrefix
 
 	// Step 2: Encryption setup
 	fmt.Println()
@@ -475,13 +521,22 @@ skipKeyGen:
 		return err
 	}
 
+	// Resolve which local Claude directory this profile syncs
+	claudeDir, err = resolveClaudeDirChoice(claudeDir)
+	if err != nil {
+		return err
+	}
+
 	// Save config
 	cfg := &config.Config{
 		Storage:       storageCfg,
-		EncryptionKey: "~/.claude-sync/age-key.txt",
+		EncryptionKey: homeRelative(keyPath),
 	}
 	if scope == config.ScopeSessions {
 		cfg.Scope = config.ScopeSessions
+	}
+	if claudeDir != "" && claudeDir != config.ClaudeDir() {
+		cfg.ClaudeDir = claudeDir
 	}
 
 	if err := config.Save(cfg); err != nil {
@@ -492,11 +547,66 @@ skipKeyGen:
 	fmt.Println()
 	fmt.Println(colorGreen + "  Setup complete!" + colorReset)
 	fmt.Println()
-	printInfo("Run 'claude-sync push' to upload your sessions")
-	printInfo("Run 'claude-sync pull' on other devices to sync")
+	if cfg.ClaudeDir != "" {
+		printInfo("Syncing " + cfg.ClaudeDir)
+	}
+	flagHint := profileFlagHint()
+	printInfo("Run 'claude-sync " + flagHint + "push' to upload your sessions")
+	printInfo("Run 'claude-sync " + flagHint + "pull' on other devices to sync")
 	fmt.Println()
 
 	return nil
+}
+
+// resolveClaudeDirChoice normalizes a --claude-dir value, prompting for one
+// when a named profile is being initialized without an explicit directory.
+// Returns "" when the default ~/.claude should be used.
+func resolveClaudeDirChoice(claudeDir string) (string, error) {
+	if claudeDir == "" && config.ActiveProfile() != "" {
+		fmt.Println()
+		prompt := &survey.Input{
+			Message: "Claude config directory to sync:",
+			Default: "~/.claude",
+			Help:    "The directory this profile syncs. For a secondary account, use the directory Claude Code's CLAUDE_CONFIG_DIR points at, e.g. ~/.claude-personal.",
+		}
+		if err := survey.AskOne(prompt, &claudeDir); err != nil {
+			return "", err
+		}
+	}
+	return expandHome(claudeDir), nil
+}
+
+// expandHome expands a leading ~ to the user's home directory.
+func expandHome(path string) string {
+	if path != "" && path[0] == '~' {
+		home, err := os.UserHomeDir()
+		if err == nil {
+			return filepath.Join(home, path[1:])
+		}
+	}
+	return path
+}
+
+// homeRelative rewrites an absolute path under the home directory to a
+// portable ~/-prefixed form for storing in config.yaml.
+func homeRelative(path string) string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return path
+	}
+	if rel, err := filepath.Rel(home, path); err == nil && !strings.HasPrefix(rel, "..") {
+		return "~/" + rel
+	}
+	return path
+}
+
+// profileFlagHint returns "--profile <name> " when a named profile is active,
+// for embedding in printed example commands.
+func profileFlagHint() string {
+	if p := config.ActiveProfile(); p != "" {
+		return "--profile " + p + " "
+	}
+	return ""
 }
 
 // enterPassphraseAndVerify prompts for passphrase and verifies against remote
@@ -1011,114 +1121,128 @@ func runWebDAVWizard(webdavURL, username, password, pathPrefix string) (*storage
 }
 
 func pushCmd() *cobra.Command {
-	var includeMCP bool
+	var includeMCP, allProfiles bool
 
 	cmd := &cobra.Command{
 		Use:   "push",
 		Short: "Upload local changes to cloud storage",
-		Long:  `Encrypt and upload changed files from ~/.claude to cloud storage.`,
+		Long: `Encrypt and upload changed files from ~/.claude to cloud storage.
+
+Use --all-profiles to push every configured profile in one run (multi-account).`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := context.Background()
+
+			if allProfiles {
+				return forEachProfile(func(cfg *config.Config) error {
+					return runPush(ctx, cfg, includeMCP)
+				})
+			}
+
 			cfg, err := config.Load()
 			if err != nil {
 				return err
 			}
-
-			syncer, err := sync.NewSyncer(cfg, quiet)
-			if err != nil {
-				return err
-			}
-
-			if !quiet {
-				syncer.SetProgressFunc(func(event sync.ProgressEvent) {
-					if event.Error != nil {
-						fmt.Printf("\r%s✗%s %s: %v\n", colorYellow, colorReset, event.Path, event.Error)
-						return
-					}
-
-					switch event.Action {
-					case "scan":
-						if event.Complete {
-							fmt.Printf("\r%s✓%s No changes to push\n", colorGreen, colorReset)
-						} else {
-							fmt.Printf("%s⋯%s %s\n", colorDim, colorReset, event.Path)
-						}
-					case "upload":
-						if event.Complete {
-							// Final newline after progress
-						} else {
-							// Clear line and show progress
-							progress := fmt.Sprintf("[%d/%d]", event.Current, event.Total)
-							shortPath := util.TruncatePath(event.Path, 50)
-							fmt.Printf("\r%s↑%s %s%s%s %s (%s)%s",
-								colorCyan, colorReset,
-								colorDim, progress, colorReset,
-								shortPath, util.FormatSize(event.Size),
-								strings.Repeat(" ", 10))
-						}
-					case "delete":
-						shortPath := util.TruncatePath(event.Path, 50)
-						fmt.Printf("\r%s✗%s [%d/%d] %s (deleted)%s\n",
-							colorYellow, colorReset,
-							event.Current, event.Total,
-							shortPath,
-							strings.Repeat(" ", 10))
-					}
-				})
-			}
-
-			ctx := context.Background()
-			result, err := syncer.Push(ctx)
-			if err != nil {
-				return err
-			}
-
-			if !quiet {
-				fmt.Println() // Clear the progress line
-
-				if len(result.Uploaded) == 0 && len(result.Deleted) == 0 && len(result.Errors) == 0 {
-					// Already printed "No changes"
-				} else {
-					// Summary
-					var parts []string
-					if len(result.Uploaded) > 0 {
-						parts = append(parts, fmt.Sprintf("%s%d uploaded%s", colorGreen, len(result.Uploaded), colorReset))
-					}
-					if len(result.Deleted) > 0 {
-						parts = append(parts, fmt.Sprintf("%s%d deleted%s", colorYellow, len(result.Deleted), colorReset))
-					}
-					if len(result.Errors) > 0 {
-						parts = append(parts, fmt.Sprintf("%s%d failed%s", colorYellow, len(result.Errors), colorReset))
-					}
-					if len(parts) > 0 {
-						fmt.Printf("%s✓%s Push complete: %s\n", colorGreen, colorReset, strings.Join(parts, ", "))
-					}
-
-					if len(result.Errors) > 0 {
-						fmt.Printf("\n%sErrors:%s\n", colorYellow, colorReset)
-						for _, e := range result.Errors {
-							fmt.Printf("  %s•%s %v\n", colorYellow, colorReset, e)
-						}
-					}
-				}
-			}
-
-			// MCP sync if enabled
-			if includeMCP || cfg.IsMCPSyncEnabled() {
-				if err := runMCPPush(ctx, syncer); err != nil {
-					return err
-				}
-			}
-
-			return nil
+			return runPush(ctx, cfg, includeMCP)
 		},
 	}
 
 	cmd.Flags().BoolVar(&includeMCP, "include-mcp", false, "Also sync MCP server configs from ~/.claude.json")
+	cmd.Flags().BoolVar(&allProfiles, "all-profiles", false, "Push all configured profiles (default profile first, then named profiles)")
 	return cmd
 }
 
+// runPush performs a push for one loaded profile config.
+func runPush(ctx context.Context, cfg *config.Config, includeMCP bool) error {
+	syncer, err := sync.NewSyncer(cfg, quiet)
+	if err != nil {
+		return err
+	}
+
+	if !quiet {
+		syncer.SetProgressFunc(func(event sync.ProgressEvent) {
+			if event.Error != nil {
+				fmt.Printf("\r%s✗%s %s: %v\n", colorYellow, colorReset, event.Path, event.Error)
+				return
+			}
+
+			switch event.Action {
+			case "scan":
+				if event.Complete {
+					fmt.Printf("\r%s✓%s No changes to push\n", colorGreen, colorReset)
+				} else {
+					fmt.Printf("%s⋯%s %s\n", colorDim, colorReset, event.Path)
+				}
+			case "upload":
+				if event.Complete {
+					// Final newline after progress
+				} else {
+					// Clear line and show progress
+					progress := fmt.Sprintf("[%d/%d]", event.Current, event.Total)
+					shortPath := util.TruncatePath(event.Path, 50)
+					fmt.Printf("\r%s↑%s %s%s%s %s (%s)%s",
+						colorCyan, colorReset,
+						colorDim, progress, colorReset,
+						shortPath, util.FormatSize(event.Size),
+						strings.Repeat(" ", 10))
+				}
+			case "delete":
+				shortPath := util.TruncatePath(event.Path, 50)
+				fmt.Printf("\r%s✗%s [%d/%d] %s (deleted)%s\n",
+					colorYellow, colorReset,
+					event.Current, event.Total,
+					shortPath,
+					strings.Repeat(" ", 10))
+			}
+		})
+	}
+
+	result, err := syncer.Push(ctx)
+	if err != nil {
+		return err
+	}
+
+	if !quiet {
+		fmt.Println() // Clear the progress line
+
+		if len(result.Uploaded) == 0 && len(result.Deleted) == 0 && len(result.Errors) == 0 {
+			// Already printed "No changes"
+		} else {
+			// Summary
+			var parts []string
+			if len(result.Uploaded) > 0 {
+				parts = append(parts, fmt.Sprintf("%s%d uploaded%s", colorGreen, len(result.Uploaded), colorReset))
+			}
+			if len(result.Deleted) > 0 {
+				parts = append(parts, fmt.Sprintf("%s%d deleted%s", colorYellow, len(result.Deleted), colorReset))
+			}
+			if len(result.Errors) > 0 {
+				parts = append(parts, fmt.Sprintf("%s%d failed%s", colorYellow, len(result.Errors), colorReset))
+			}
+			if len(parts) > 0 {
+				fmt.Printf("%s✓%s Push complete: %s\n", colorGreen, colorReset, strings.Join(parts, ", "))
+			}
+
+			if len(result.Errors) > 0 {
+				fmt.Printf("\n%sErrors:%s\n", colorYellow, colorReset)
+				for _, e := range result.Errors {
+					fmt.Printf("  %s•%s %v\n", colorYellow, colorReset, e)
+				}
+			}
+		}
+	}
+
+	// MCP sync if enabled
+	if includeMCP || cfg.IsMCPSyncEnabled() {
+		if err := runMCPPush(ctx, syncer); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 func pullCmd() *cobra.Command {
-	var dryRun, force, includeMCP, rebuildHistory bool
+	var dryRun, force, includeMCP, rebuildHistory, allProfiles bool
 
 	cmd := &cobra.Command{
 		Use:   "pull",
@@ -1129,132 +1253,24 @@ On first pull with existing local files, you'll be prompted to confirm
 before any files are overwritten. Use --dry-run to preview changes first.
 
 Examples:
-  claude-sync pull              # Pull with safety prompts
-  claude-sync pull --dry-run    # Preview what would be changed
-  claude-sync pull --force      # Skip confirmation prompts`,
+  claude-sync pull                # Pull with safety prompts
+  claude-sync pull --dry-run      # Preview what would be changed
+  claude-sync pull --force        # Skip confirmation prompts
+  claude-sync pull --all-profiles # Pull every configured profile (multi-account)`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := context.Background()
+
+			if allProfiles {
+				return forEachProfile(func(cfg *config.Config) error {
+					return runPull(ctx, cfg, dryRun, force, includeMCP, rebuildHistory)
+				})
+			}
+
 			cfg, err := config.Load()
 			if err != nil {
 				return err
 			}
-
-			syncer, err := sync.NewSyncer(cfg, quiet)
-			if err != nil {
-				return err
-			}
-
-			ctx := context.Background()
-
-			// Check for first pull with existing local files
-			if !syncer.HasState() {
-				hasExisting, err := hasExistingClaudeFiles(cfg)
-				if err != nil {
-					return err
-				}
-
-				if hasExisting && !force {
-					return handleFirstPullWithExistingFiles(ctx, syncer, dryRun)
-				}
-			}
-
-			// Handle dry-run for normal pulls
-			if dryRun {
-				return showPullPreview(ctx, syncer)
-			}
-
-			if !quiet {
-				syncer.SetProgressFunc(func(event sync.ProgressEvent) {
-					if event.Error != nil {
-						fmt.Printf("\r%s✗%s %s: %v\n", colorYellow, colorReset, event.Path, event.Error)
-						return
-					}
-
-					switch event.Action {
-					case "scan":
-						if event.Complete {
-							fmt.Printf("\r%s✓%s Already up to date\n", colorGreen, colorReset)
-						} else {
-							fmt.Printf("%s⋯%s %s\n", colorDim, colorReset, event.Path)
-						}
-					case "download":
-						if event.Complete {
-							// Final newline after progress
-						} else {
-							// Clear line and show progress
-							progress := fmt.Sprintf("[%d/%d]", event.Current, event.Total)
-							shortPath := util.TruncatePath(event.Path, 50)
-							fmt.Printf("\r%s↓%s %s%s%s %s (%s)%s",
-								colorGreen, colorReset,
-								colorDim, progress, colorReset,
-								shortPath, util.FormatSize(event.Size),
-								strings.Repeat(" ", 10))
-						}
-					case "conflict":
-						fmt.Printf("\r%s⚠%s Conflict: %s (saved as .conflict)\n",
-							colorYellow, colorReset, event.Path)
-					}
-				})
-			}
-
-			result, err := syncer.Pull(ctx)
-			if err != nil {
-				return err
-			}
-
-			if !quiet {
-				fmt.Println() // Clear the progress line
-
-				if len(result.Downloaded) == 0 && len(result.Conflicts) == 0 && len(result.Errors) == 0 {
-					// Already printed "Already up to date"
-				} else {
-					// Summary
-					var parts []string
-					if len(result.Downloaded) > 0 {
-						parts = append(parts, fmt.Sprintf("%s%d downloaded%s", colorGreen, len(result.Downloaded), colorReset))
-					}
-					if len(result.Conflicts) > 0 {
-						parts = append(parts, fmt.Sprintf("%s%d conflicts%s", colorYellow, len(result.Conflicts), colorReset))
-					}
-					if len(result.Errors) > 0 {
-						parts = append(parts, fmt.Sprintf("%s%d failed%s", colorYellow, len(result.Errors), colorReset))
-					}
-					if len(parts) > 0 {
-						fmt.Printf("%s✓%s Pull complete: %s\n", colorGreen, colorReset, strings.Join(parts, ", "))
-					}
-
-					if len(result.Conflicts) > 0 {
-						fmt.Printf("\n%sConflicts (both local and remote changed):%s\n", colorYellow, colorReset)
-						for _, c := range result.Conflicts {
-							fmt.Printf("  %s•%s %s\n", colorYellow, colorReset, c)
-						}
-						fmt.Printf("\n%sLocal versions kept. Remote saved as .conflict files.%s\n", colorDim, colorReset)
-						fmt.Printf("%sRun '%sclaude-sync conflicts%s%s' to review and resolve.%s\n", colorDim, colorCyan, colorReset, colorDim, colorReset)
-					}
-
-					if len(result.Errors) > 0 {
-						fmt.Printf("\n%sErrors:%s\n", colorYellow, colorReset)
-						for _, e := range result.Errors {
-							fmt.Printf("  %s•%s %v\n", colorYellow, colorReset, e)
-						}
-					}
-				}
-			}
-
-			// MCP sync if enabled
-			if includeMCP || cfg.IsMCPSyncEnabled() {
-				if err := runMCPPull(ctx, syncer); err != nil {
-					return err
-				}
-			}
-
-			// Rebuild prompt history from the freshly-pulled session files.
-			if rebuildHistory && !dryRun {
-				if err := runHistoryRebuild(); err != nil {
-					return fmt.Errorf("rebuilding history: %w", err)
-				}
-			}
-
-			return nil
+			return runPull(ctx, cfg, dryRun, force, includeMCP, rebuildHistory)
 		},
 	}
 
@@ -1262,8 +1278,128 @@ Examples:
 	cmd.Flags().BoolVar(&force, "force", false, "Overwrite existing files without confirmation")
 	cmd.Flags().BoolVar(&includeMCP, "include-mcp", false, "Also sync MCP server configs from ~/.claude.json")
 	cmd.Flags().BoolVar(&rebuildHistory, "rebuild-history", false, "Rebuild ~/.claude/history.jsonl from session files after pulling")
+	cmd.Flags().BoolVar(&allProfiles, "all-profiles", false, "Pull all configured profiles (default profile first, then named profiles)")
 
 	return cmd
+}
+
+// runPull performs a pull for one loaded profile config.
+func runPull(ctx context.Context, cfg *config.Config, dryRun, force, includeMCP, rebuildHistory bool) error {
+	syncer, err := sync.NewSyncer(cfg, quiet)
+	if err != nil {
+		return err
+	}
+
+	// Check for first pull with existing local files
+	if !syncer.HasState() {
+		hasExisting, err := hasExistingClaudeFiles(cfg)
+		if err != nil {
+			return err
+		}
+
+		if hasExisting && !force {
+			return handleFirstPullWithExistingFiles(ctx, syncer, dryRun)
+		}
+	}
+
+	// Handle dry-run for normal pulls
+	if dryRun {
+		return showPullPreview(ctx, syncer)
+	}
+
+	if !quiet {
+		syncer.SetProgressFunc(func(event sync.ProgressEvent) {
+			if event.Error != nil {
+				fmt.Printf("\r%s✗%s %s: %v\n", colorYellow, colorReset, event.Path, event.Error)
+				return
+			}
+
+			switch event.Action {
+			case "scan":
+				if event.Complete {
+					fmt.Printf("\r%s✓%s Already up to date\n", colorGreen, colorReset)
+				} else {
+					fmt.Printf("%s⋯%s %s\n", colorDim, colorReset, event.Path)
+				}
+			case "download":
+				if event.Complete {
+					// Final newline after progress
+				} else {
+					// Clear line and show progress
+					progress := fmt.Sprintf("[%d/%d]", event.Current, event.Total)
+					shortPath := util.TruncatePath(event.Path, 50)
+					fmt.Printf("\r%s↓%s %s%s%s %s (%s)%s",
+						colorGreen, colorReset,
+						colorDim, progress, colorReset,
+						shortPath, util.FormatSize(event.Size),
+						strings.Repeat(" ", 10))
+				}
+			case "conflict":
+				fmt.Printf("\r%s⚠%s Conflict: %s (saved as .conflict)\n",
+					colorYellow, colorReset, event.Path)
+			}
+		})
+	}
+
+	result, err := syncer.Pull(ctx)
+	if err != nil {
+		return err
+	}
+
+	if !quiet {
+		fmt.Println() // Clear the progress line
+
+		if len(result.Downloaded) == 0 && len(result.Conflicts) == 0 && len(result.Errors) == 0 {
+			// Already printed "Already up to date"
+		} else {
+			// Summary
+			var parts []string
+			if len(result.Downloaded) > 0 {
+				parts = append(parts, fmt.Sprintf("%s%d downloaded%s", colorGreen, len(result.Downloaded), colorReset))
+			}
+			if len(result.Conflicts) > 0 {
+				parts = append(parts, fmt.Sprintf("%s%d conflicts%s", colorYellow, len(result.Conflicts), colorReset))
+			}
+			if len(result.Errors) > 0 {
+				parts = append(parts, fmt.Sprintf("%s%d failed%s", colorYellow, len(result.Errors), colorReset))
+			}
+			if len(parts) > 0 {
+				fmt.Printf("%s✓%s Pull complete: %s\n", colorGreen, colorReset, strings.Join(parts, ", "))
+			}
+
+			if len(result.Conflicts) > 0 {
+				fmt.Printf("\n%sConflicts (both local and remote changed):%s\n", colorYellow, colorReset)
+				for _, c := range result.Conflicts {
+					fmt.Printf("  %s•%s %s\n", colorYellow, colorReset, c)
+				}
+				fmt.Printf("\n%sLocal versions kept. Remote saved as .conflict files.%s\n", colorDim, colorReset)
+				fmt.Printf("%sRun '%sclaude-sync conflicts%s%s' to review and resolve.%s\n", colorDim, colorCyan, colorReset, colorDim, colorReset)
+			}
+
+			if len(result.Errors) > 0 {
+				fmt.Printf("\n%sErrors:%s\n", colorYellow, colorReset)
+				for _, e := range result.Errors {
+					fmt.Printf("  %s•%s %v\n", colorYellow, colorReset, e)
+				}
+			}
+		}
+	}
+
+	// MCP sync if enabled
+	if includeMCP || cfg.IsMCPSyncEnabled() {
+		if err := runMCPPull(ctx, syncer); err != nil {
+			return err
+		}
+	}
+
+	// Rebuild prompt history from the freshly-pulled session files.
+	if rebuildHistory && !dryRun {
+		if err := runHistoryRebuildFor(cfg); err != nil {
+			return fmt.Errorf("rebuilding history: %w", err)
+		}
+	}
+
+	return nil
 }
 
 func statusCmd() *cobra.Command {
@@ -1442,6 +1578,9 @@ Examples:
   claude-sync conflicts --keep remote # Keep all remote versions`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			claudeDir := config.ClaudeDir()
+			if cfg, err := config.Load(); err == nil {
+				claudeDir = cfg.ResolveClaudeDir()
+			}
 
 			// Find all .conflict files
 			conflicts, err := findConflicts(claudeDir)
@@ -1833,17 +1972,21 @@ Existing entries are preserved as-is; recovered entries are merged in,
 deduplicated, and sorted by timestamp. The previous file is kept as
 history.jsonl.bak.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runHistoryRebuild()
+			cfg, err := config.Load()
+			if err != nil {
+				return err
+			}
+			return runHistoryRebuildFor(cfg)
 		},
 	}
 }
 
-// runHistoryRebuild rebuilds history.jsonl and reports how many prompts were
-// recovered from session files.
-func runHistoryRebuild() error {
-	claudeDir, err := config.ClaudeDirE()
-	if err != nil {
-		return err
+// runHistoryRebuildFor rebuilds history.jsonl for the config's Claude
+// directory and reports how many prompts were recovered from session files.
+func runHistoryRebuildFor(cfg *config.Config) error {
+	claudeDir := cfg.ResolveClaudeDir()
+	if claudeDir == "" {
+		return config.ErrNoHomeDir
 	}
 	result, err := sync.RebuildHistory(claudeDir)
 	if err != nil {
@@ -2052,7 +2195,7 @@ Examples:
 }
 
 func getLatestRelease() (*GitHubRelease, error) {
-	url := "https://api.github.com/repos/tawanorg/claude-sync/releases/latest"
+	url := "https://api.github.com/repos/leog/claude-sync-profiles/releases/latest"
 
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -2286,9 +2429,9 @@ func clearRemoteStorage(ctx context.Context, store storage.Storage) error {
 	return store.DeleteBatch(ctx, keys)
 }
 
-// hasExistingClaudeFiles checks if ~/.claude has any files that would be synced
+// hasExistingClaudeFiles checks if the config's Claude directory has any files that would be synced
 func hasExistingClaudeFiles(cfg *config.Config) (bool, error) {
-	claudeDir := config.ClaudeDir()
+	claudeDir := cfg.ResolveClaudeDir()
 	if _, err := os.Stat(claudeDir); os.IsNotExist(err) {
 		return false, nil
 	}
@@ -2320,7 +2463,7 @@ func handleFirstPullWithExistingFiles(ctx context.Context, syncer *sync.Syncer, 
 
 	// Show warning
 	fmt.Println()
-	printWarning("Local ~/.claude already has files that would be affected:")
+	printWarning("Local " + syncer.ClaudeDir() + " already has files that would be affected:")
 	fmt.Println()
 
 	// Show files that would be overwritten
@@ -2377,7 +2520,7 @@ func handleFirstPullWithExistingFiles(ctx context.Context, syncer *sync.Syncer, 
 	switch choice {
 	case 0:
 		// Backup and proceed
-		backupDir, err := createBackup(syncer.SyncPaths())
+		backupDir, err := createBackup(syncer.ClaudeDir(), syncer.SyncPaths())
 		if err != nil {
 			return fmt.Errorf("failed to create backup: %w", err)
 		}
@@ -2397,9 +2540,8 @@ func handleFirstPullWithExistingFiles(ctx context.Context, syncer *sync.Syncer, 
 	}
 }
 
-// createBackup creates a backup of the current ~/.claude directory
-func createBackup(syncPaths []string) (string, error) {
-	claudeDir := config.ClaudeDir()
+// createBackup creates a backup of the given Claude directory
+func createBackup(claudeDir string, syncPaths []string) (string, error) {
 	timestamp := time.Now().Format("20060102-150405")
 	backupDir := claudeDir + ".backup." + timestamp
 
@@ -2649,7 +2791,7 @@ Examples:
 			}
 
 			fmt.Println()
-			fmt.Printf("%sView all releases: %shttps://github.com/tawanorg/claude-sync/releases%s\n", colorDim, colorCyan, colorReset)
+			fmt.Printf("%sView all releases: %shttps://github.com/leog/claude-sync-profiles/releases%s\n", colorDim, colorCyan, colorReset)
 			fmt.Println()
 
 			return nil
@@ -2674,7 +2816,7 @@ type GitHubReleaseWithBody struct {
 }
 
 func getAllReleases(limit int) ([]GitHubReleaseWithBody, error) {
-	url := fmt.Sprintf("https://api.github.com/repos/tawanorg/claude-sync/releases?per_page=%d", limit)
+	url := fmt.Sprintf("https://api.github.com/repos/leog/claude-sync-profiles/releases?per_page=%d", limit)
 
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -2780,7 +2922,7 @@ func mcpStatusCmd() *cobra.Command {
 			}
 
 			if status.ServerCount == 0 {
-				fmt.Printf("  Servers    %s0 servers%s in %s\n", colorDim, colorReset, config.ClaudeJSONPath())
+				fmt.Printf("  Servers    %s0 servers%s in %s\n", colorDim, colorReset, cfg.ResolveClaudeJSONPath())
 			} else {
 				fmt.Printf("  Servers    %d configured\n", status.ServerCount)
 			}
@@ -2868,7 +3010,7 @@ func mcpListCmd() *cobra.Command {
 			}
 
 			if status.ServerCount == 0 {
-				fmt.Printf("%s⋯%s No MCP servers found in %s\n", colorDim, colorReset, config.ClaudeJSONPath())
+				fmt.Printf("%s⋯%s No MCP servers found in %s\n", colorDim, colorReset, cfg.ResolveClaudeJSONPath())
 				return nil
 			}
 
@@ -2993,13 +3135,73 @@ func runMCPPull(ctx context.Context, syncer *sync.Syncer) error {
 	return nil
 }
 
+// autoSyncSettingsPath returns the settings.json path inside the active
+// profile's Claude directory, falling back to ~/.claude/settings.json when no
+// config exists yet.
+func autoSyncSettingsPath() (string, error) {
+	if cfg, err := config.Load(); err == nil {
+		return filepath.Join(cfg.ResolveClaudeDir(), "settings.json"), nil
+	}
+	path := claudesettings.SettingsPath("")
+	if path == "" {
+		return "", config.ErrNoHomeDir
+	}
+	return path, nil
+}
+
+// autoSyncHookConfig returns the hook commands to install, including the
+// --profile flag when a named profile is active so the hooks sync the right
+// account.
+func autoSyncHookConfig() claudesettings.AutoSyncConfig {
+	hookCfg := claudesettings.DefaultAutoSyncConfig()
+	if hint := profileFlagHint(); hint != "" {
+		hookCfg.PullCommand = "claude-sync " + hint + "pull -q"
+		hookCfg.PushCommand = "claude-sync " + hint + "push -q"
+	}
+	return hookCfg
+}
+
+// autoSyncTargetPath resolves where auto-sync hooks are managed: the active
+// profile's global settings.json (every project), or a specific project's
+// .claude/settings.local.json (--project). --shared switches a project target
+// to the committed .claude/settings.json instead of the personal local file.
+func autoSyncTargetPath(project string, shared bool) (string, error) {
+	if project == "" {
+		return autoSyncSettingsPath()
+	}
+	abs, err := filepath.Abs(expandHome(project))
+	if err != nil {
+		return "", err
+	}
+	if info, err := os.Stat(abs); err != nil || !info.IsDir() {
+		return "", fmt.Errorf("project directory not found: %s", abs)
+	}
+	name := "settings.local.json"
+	if shared {
+		name = "settings.json"
+	}
+	return filepath.Join(abs, ".claude", name), nil
+}
+
 // autoCmd manages auto-sync hooks in Claude Code settings
 func autoCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "auto",
 		Short: "Manage auto-sync hooks for Claude Code",
 		Long: `Install or remove claude-sync hooks that automatically pull on session start
-and push on session end. Hooks are stored in ~/.claude/settings.json.`,
+and push on session end, so syncing happens transparently.
+
+By default hooks go into settings.json inside the profile's Claude directory
+(~/.claude/settings.json), which applies to every project. Use --project to
+install them for one project only (written to that project's
+.claude/settings.local.json; add --shared to use the committed
+.claude/settings.json instead).
+
+With a named profile, the installed commands include --profile <name>, so each
+account syncs through its own profile:
+
+  claude-sync --profile personal auto enable                  # all projects
+  claude-sync --profile personal auto enable --project ~/dev/side-project`,
 	}
 
 	cmd.AddCommand(
@@ -3012,25 +3214,35 @@ and push on session end. Hooks are stored in ~/.claude/settings.json.`,
 }
 
 func autoEnableCmd() *cobra.Command {
-	var dryRun bool
+	var dryRun, shared bool
+	var project string
 
 	cmd := &cobra.Command{
 		Use:   "enable",
 		Short: "Install auto-sync hooks into Claude Code",
-		Long: `Adds hooks to ~/.claude/settings.json:
-  - SessionStart: runs "claude-sync pull -q" when a session begins
-  - Stop: runs "claude-sync push -q" when a session ends
+		Long: `Adds hooks so sync happens transparently:
+  - SessionStart: runs "claude-sync [--profile <name>] pull -q" when a session begins
+  - Stop: runs "claude-sync [--profile <name>] push -q" when a session ends
+
+Without --project, hooks are installed in the profile's Claude directory
+settings.json and apply to every project. With --project <path>, hooks are
+installed in that project's .claude/settings.local.json and apply only to
+sessions in that project (--shared writes .claude/settings.json instead).
 
 Existing hooks are preserved. This command is idempotent.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			path := claudesettings.SettingsPath("")
+			path, err := autoSyncTargetPath(project, shared)
+			if err != nil {
+				return err
+			}
+			hookCfg := autoSyncHookConfig()
 
 			settings, err := claudesettings.Load(path)
 			if err != nil {
 				return fmt.Errorf("failed to load settings: %w", err)
 			}
 
-			changed := settings.EnableAutoSync()
+			changed := settings.EnableAutoSyncWithConfig(hookCfg)
 
 			if !changed {
 				if !quiet {
@@ -3040,9 +3252,9 @@ Existing hooks are preserved. This command is idempotent.`,
 			}
 
 			if dryRun {
-				fmt.Printf("%s⋯%s Dry run: would install auto-sync hooks:\n", colorDim, colorReset)
-				fmt.Printf("    SessionStart → %s\n", claudesettings.HookCommandPull)
-				fmt.Printf("    Stop → %s\n", claudesettings.HookCommandPush)
+				fmt.Printf("%s⋯%s Dry run: would install auto-sync hooks in %s:\n", colorDim, colorReset, path)
+				fmt.Printf("    SessionStart → %s\n", hookCfg.PullCommand)
+				fmt.Printf("    Stop → %s\n", hookCfg.PushCommand)
 				return nil
 			}
 
@@ -3051,9 +3263,9 @@ Existing hooks are preserved. This command is idempotent.`,
 			}
 
 			if !quiet {
-				fmt.Printf("%s✓%s Auto-sync hooks installed:\n", colorGreen, colorReset)
-				fmt.Printf("    SessionStart → %s\n", claudesettings.HookCommandPull)
-				fmt.Printf("    Stop → %s\n", claudesettings.HookCommandPush)
+				fmt.Printf("%s✓%s Auto-sync hooks installed in %s:\n", colorGreen, colorReset, path)
+				fmt.Printf("    SessionStart → %s\n", hookCfg.PullCommand)
+				fmt.Printf("    Stop → %s\n", hookCfg.PushCommand)
 			}
 
 			return nil
@@ -3061,20 +3273,27 @@ Existing hooks are preserved. This command is idempotent.`,
 	}
 
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show what would be changed without modifying files")
+	cmd.Flags().StringVar(&project, "project", "", "Install hooks for one project only (path to the project directory)")
+	cmd.Flags().BoolVar(&shared, "shared", false, "With --project: write the committed .claude/settings.json instead of .claude/settings.local.json")
 
 	return cmd
 }
 
 func autoDisableCmd() *cobra.Command {
-	var dryRun bool
+	var dryRun, shared bool
+	var project string
 
 	cmd := &cobra.Command{
 		Use:   "disable",
 		Short: "Remove auto-sync hooks from Claude Code",
-		Long: `Removes claude-sync hooks from ~/.claude/settings.json.
+		Long: `Removes claude-sync hooks from the profile's Claude directory settings.json,
+or from a project's .claude/settings.local.json with --project.
 Other hooks are preserved. This command is idempotent.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			path := claudesettings.SettingsPath("")
+			path, err := autoSyncTargetPath(project, shared)
+			if err != nil {
+				return err
+			}
 
 			settings, err := claudesettings.Load(path)
 			if err != nil {
@@ -3100,7 +3319,7 @@ Other hooks are preserved. This command is idempotent.`,
 			}
 
 			if !quiet {
-				fmt.Printf("%s✓%s Auto-sync hooks removed\n", colorGreen, colorReset)
+				fmt.Printf("%s✓%s Auto-sync hooks removed from %s\n", colorGreen, colorReset, path)
 			}
 
 			return nil
@@ -3108,16 +3327,25 @@ Other hooks are preserved. This command is idempotent.`,
 	}
 
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show what would be changed without modifying files")
+	cmd.Flags().StringVar(&project, "project", "", "Remove hooks from one project only (path to the project directory)")
+	cmd.Flags().BoolVar(&shared, "shared", false, "With --project: target the committed .claude/settings.json instead of .claude/settings.local.json")
 
 	return cmd
 }
 
 func autoStatusCmd() *cobra.Command {
-	return &cobra.Command{
+	var shared bool
+	var project string
+
+	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "Show auto-sync hook status",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			path := claudesettings.SettingsPath("")
+			path, err := autoSyncTargetPath(project, shared)
+			if err != nil {
+				return err
+			}
+			hookCfg := autoSyncHookConfig()
 
 			settings, err := claudesettings.Load(path)
 			if err != nil {
@@ -3129,10 +3357,10 @@ func autoStatusCmd() *cobra.Command {
 			if status.Enabled {
 				fmt.Printf("%s✓%s Auto-sync: %senabled%s\n", colorGreen, colorReset, colorGreen, colorReset)
 				if status.HasSessionStart {
-					fmt.Printf("    SessionStart → %s\n", claudesettings.HookCommandPull)
+					fmt.Printf("    SessionStart → %s\n", hookCfg.PullCommand)
 				}
 				if status.HasStop {
-					fmt.Printf("    Stop → %s\n", claudesettings.HookCommandPush)
+					fmt.Printf("    Stop → %s\n", hookCfg.PushCommand)
 				}
 			} else {
 				fmt.Printf("%s⋯%s Auto-sync: %snot installed%s\n", colorDim, colorReset, colorDim, colorReset)
@@ -3142,6 +3370,11 @@ func autoStatusCmd() *cobra.Command {
 			return nil
 		},
 	}
+
+	cmd.Flags().StringVar(&project, "project", "", "Show hook status for one project (path to the project directory)")
+	cmd.Flags().BoolVar(&shared, "shared", false, "With --project: check the committed .claude/settings.json instead of .claude/settings.local.json")
+
+	return cmd
 }
 
 // pathsCmd manages sync paths and exclude filters
@@ -3187,7 +3420,7 @@ func runPathsList() error {
 		return err
 	}
 
-	mgr := paths.NewManager(cfg.SyncPaths, cfg.Exclude, config.ClaudeDir(), cfg.Scope)
+	mgr := paths.NewManager(cfg.SyncPaths, cfg.Exclude, cfg.ResolveClaudeDir(), cfg.Scope)
 	status := mgr.Status()
 
 	source := "default"
@@ -3258,7 +3491,7 @@ conflicting exclude is automatically removed.`,
 				return err
 			}
 
-			mgr := paths.NewManager(cfg.SyncPaths, cfg.Exclude, config.ClaudeDir(), cfg.Scope)
+			mgr := paths.NewManager(cfg.SyncPaths, cfg.Exclude, cfg.ResolveClaudeDir(), cfg.Scope)
 			result := mgr.Add(args[0])
 
 			if result.Invalid != nil {
@@ -3313,7 +3546,7 @@ Custom paths are simply removed from the list.`,
 				return err
 			}
 
-			mgr := paths.NewManager(cfg.SyncPaths, cfg.Exclude, config.ClaudeDir(), cfg.Scope)
+			mgr := paths.NewManager(cfg.SyncPaths, cfg.Exclude, cfg.ResolveClaudeDir(), cfg.Scope)
 
 			if !mgr.HasPath(args[0]) {
 				fmt.Printf("%s!%s %s is not in the sync list\n", colorYellow, colorReset, args[0])
@@ -3367,7 +3600,7 @@ Glob syntax: dir/*, dir/**, **/*.ext`,
 				return err
 			}
 
-			mgr := paths.NewManager(cfg.SyncPaths, cfg.Exclude, config.ClaudeDir(), cfg.Scope)
+			mgr := paths.NewManager(cfg.SyncPaths, cfg.Exclude, cfg.ResolveClaudeDir(), cfg.Scope)
 			result := mgr.AddExclude(args[0])
 
 			if result.IsSyncPath {
@@ -3403,7 +3636,7 @@ func pathsUnexcludeCmd() *cobra.Command {
 				return err
 			}
 
-			mgr := paths.NewManager(cfg.SyncPaths, cfg.Exclude, config.ClaudeDir(), cfg.Scope)
+			mgr := paths.NewManager(cfg.SyncPaths, cfg.Exclude, cfg.ResolveClaudeDir(), cfg.Scope)
 			result := mgr.RemoveExclude(args[0])
 
 			if result.NotFound {
@@ -3456,5 +3689,154 @@ func pathsResetCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVarP(&force, "force", "f", false, "Skip confirmation")
+	return cmd
+}
+
+// forEachProfile runs fn once per configured profile: the default profile
+// first (if configured), then named profiles alphabetically. Profiles without
+// a config.yaml are skipped. Failures don't stop the remaining profiles; they
+// are reported together at the end. The active profile is restored on return.
+func forEachProfile(fn func(cfg *config.Config) error) error {
+	original := config.ActiveProfile()
+	defer func() { _ = config.SetActiveProfile(original) }()
+
+	names, err := config.ListProfiles()
+	if err != nil {
+		return err
+	}
+	all := append([]string{""}, names...)
+
+	ran := 0
+	var errs []error
+	for _, name := range all {
+		if err := config.SetActiveProfile(name); err != nil {
+			return err
+		}
+		if !config.Exists() {
+			continue
+		}
+
+		label := name
+		if label == "" {
+			label = "default"
+		}
+		cfg, err := config.Load()
+		if err != nil {
+			errs = append(errs, fmt.Errorf("profile %s: %w", label, err))
+			continue
+		}
+		ran++
+
+		if !quiet {
+			fmt.Printf("\n%s── profile: %s%s%s%s (%s) ──%s\n",
+				colorBold, colorCyan, label, colorReset, colorBold,
+				cfg.ResolveClaudeDir(), colorReset)
+		}
+		if err := fn(cfg); err != nil {
+			errs = append(errs, fmt.Errorf("profile %s: %w", label, err))
+		}
+	}
+
+	if ran == 0 {
+		return fmt.Errorf("no configured profiles found: run 'claude-sync init' first")
+	}
+	if len(errs) > 0 {
+		fmt.Println()
+		for _, e := range errs {
+			printWarning(e.Error())
+		}
+		return fmt.Errorf("%d profile(s) failed", len(errs))
+	}
+	return nil
+}
+
+// profilesCmd lists sync profiles (multi-account support).
+func profilesCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:     "profiles",
+		Aliases: []string{"profile"},
+		Short:   "List sync profiles (multi-account)",
+		Long: `List configured sync profiles.
+
+A profile bundles its own storage config, encryption key, sync state, and
+Claude directory, so several Claude accounts can be synced independently
+from one machine. The default profile lives in ~/.claude-sync and syncs
+~/.claude; named profiles live in ~/.claude-sync/profiles/<name>/.
+
+Create one with:
+  claude-sync --profile personal init --claude-dir ~/.claude-personal
+
+Then use any command with --profile (or set $` + config.ProfileEnvVar + `):
+  claude-sync --profile personal push
+  claude-sync push --all-profiles`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			active := config.ActiveProfile()
+			defer func() { _ = config.SetActiveProfile(active) }()
+
+			names, err := config.ListProfiles()
+			if err != nil {
+				return err
+			}
+			all := append([]string{""}, names...)
+
+			fmt.Println()
+			shown := 0
+			for _, name := range all {
+				if err := config.SetActiveProfile(name); err != nil {
+					return err
+				}
+
+				label := name
+				if label == "" {
+					label = "default"
+				}
+
+				if !config.Exists() {
+					if name == "" && len(names) > 0 {
+						// Default profile intentionally unused on a
+						// profiles-only setup; don't advertise it as broken.
+						continue
+					}
+					fmt.Printf("  %s○%s %s %s(not configured — run 'claude-sync %sinit')%s\n",
+						colorDim, colorReset, label, colorDim, profileFlagHint(), colorReset)
+					continue
+				}
+
+				cfg, err := config.Load()
+				if err != nil {
+					fmt.Printf("  %s✗%s %s %s(config error: %v)%s\n", colorYellow, colorReset, label, colorDim, err, colorReset)
+					continue
+				}
+				shown++
+
+				marker := " "
+				if name == active {
+					marker = colorGreen + "▸" + colorReset
+				}
+				storageCfg := cfg.GetStorageConfig()
+				remote := fmt.Sprintf("%s/%s", storageCfg.Provider, storageCfg.Bucket)
+				if storageCfg.Prefix != "" {
+					remote += "/" + storageCfg.Prefix
+				}
+				fmt.Printf("  %s %s%s%s\n", marker, colorBold, label, colorReset)
+				fmt.Printf("      %sClaude dir:%s %s\n", colorDim, colorReset, cfg.ResolveClaudeDir())
+				fmt.Printf("      %sRemote:%s     %s\n", colorDim, colorReset, remote)
+			}
+
+			if shown == 0 {
+				fmt.Printf("  %sNo profiles configured yet.%s\n", colorDim, colorReset)
+			}
+			fmt.Println()
+			fmt.Printf("  %sActive profile: %s%s\n", colorDim, func() string {
+				if active == "" {
+					return "default"
+				}
+				return active
+			}(), colorReset)
+			fmt.Printf("  %sAdd another: claude-sync --profile <name> init --claude-dir <dir>%s\n", colorDim, colorReset)
+			fmt.Println()
+			return nil
+		},
+	}
 	return cmd
 }

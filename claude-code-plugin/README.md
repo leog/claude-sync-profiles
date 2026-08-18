@@ -16,7 +16,7 @@ Sync your Claude Code sessions across devices with encrypted cloud storage.
 
 1. Install claude-sync CLI:
    ```bash
-   npm install -g @tawandotorg/claude-sync
+   npm install -g claude-sync-profiles
    ```
 
 2. Install Python dependency for key generation:
@@ -30,7 +30,7 @@ Sync your Claude Code sessions across devices with encrypted cloud storage.
 
 In a Claude Code session, run:
 ```
-/plugin marketplace add tawanorg/claude-sync
+/plugin marketplace add leog/claude-sync-profiles
 /plugin install claude-sync
 ```
 
@@ -113,11 +113,11 @@ The plugin automatically:
 
 ## Setting Up a Second Device
 
-1. Install the CLI: `npm install -g @tawandotorg/claude-sync`
+1. Install the CLI: `npm install -g claude-sync-profiles`
 2. Install argon2: `pip3 install argon2-cffi`
 3. Install the plugin:
    ```
-   /plugin marketplace add tawanorg/claude-sync
+   /plugin marketplace add leog/claude-sync-profiles
    /plugin install claude-sync
    ```
 4. Run `/sync-init`
@@ -153,7 +153,7 @@ The passphrase generates the same encryption key on any device, so there's no ne
 
 Install the CLI:
 ```bash
-npm install -g @tawandotorg/claude-sync
+npm install -g claude-sync-profiles
 ```
 
 ### "argon2-cffi package required"

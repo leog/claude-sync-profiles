@@ -29,8 +29,8 @@ test("isAllowedHost accepts GitHub release download hosts", () => {
   const isAllowedHost = loadHelper("isAllowedHost");
 
   for (const url of [
-    "https://github.com/tawanorg/claude-sync/releases/download/v1.0.0/x",
-    "https://api.github.com/repos/tawanorg/claude-sync/releases/latest",
+    "https://github.com/leog/claude-sync-profiles/releases/download/v1.0.0/x",
+    "https://api.github.com/repos/leog/claude-sync-profiles/releases/latest",
     // The historical asset CDN.
     "https://objects.githubusercontent.com/foo",
     // The current asset CDN — the host whose absence broke every install.

@@ -8,8 +8,8 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/tawanorg/claude-sync/internal/config"
-	"github.com/tawanorg/claude-sync/internal/crypto"
+	"github.com/leog/claude-sync-profiles/internal/config"
+	"github.com/leog/claude-sync-profiles/internal/crypto"
 )
 
 // testSyncer creates a Syncer with in-memory mock storage and temp dirs using NewSyncerWith.

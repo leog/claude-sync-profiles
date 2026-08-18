@@ -1,7 +1,7 @@
 {
-  "name": "@tawandotorg/claude-sync",
-  "version": "0.4.0",
-  "description": "Sync Claude Code sessions across devices with encrypted cloud storage",
+  "name": "claude-sync-profiles",
+  "version": "1.18.0",
+  "description": "Sync Claude Code sessions across devices with encrypted cloud storage — with multi-account profiles. Fork of tawanorg/claude-sync.",
   "bin": {
     "claude-sync": "./bin/claude-sync.js"
   },
@@ -13,6 +13,8 @@
     "claude",
     "claude-code",
     "sync",
+    "profiles",
+    "multi-account",
     "cli",
     "anthropic",
     "ai",
@@ -23,25 +25,25 @@
     "nextcloud",
     "encryption"
   ],
-  "author": "tawanorg",
+  "author": "leog",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/tawanorg/claude-sync.git"
+    "url": "git+https://github.com/leog/claude-sync-profiles.git"
   },
   "bugs": {
-    "url": "https://github.com/tawanorg/claude-sync/issues"
+    "url": "https://github.com/leog/claude-sync-profiles/issues"
   },
-  "homepage": "https://github.com/tawanorg/claude-sync#readme",
+  "homepage": "https://github.com/leog/claude-sync-profiles#readme",
   "engines": {
     "node": ">=14"
   },
   "optionalDependencies": {
-    "@tawandotorg/claude-sync-darwin-arm64": "0.4.0",
-    "@tawandotorg/claude-sync-darwin-x64": "0.4.0",
-    "@tawandotorg/claude-sync-linux-arm64": "0.4.0",
-    "@tawandotorg/claude-sync-linux-x64": "0.4.0",
-    "@tawandotorg/claude-sync-win32-arm64": "0.4.0",
-    "@tawandotorg/claude-sync-win32-x64": "0.4.0"
+    "claude-sync-profiles-darwin-arm64": "1.18.0",
+    "claude-sync-profiles-darwin-x64": "1.18.0",
+    "claude-sync-profiles-linux-arm64": "1.18.0",
+    "claude-sync-profiles-linux-x64": "1.18.0",
+    "claude-sync-profiles-win32-arm64": "1.18.0",
+    "claude-sync-profiles-win32-x64": "1.18.0"
   }
 }

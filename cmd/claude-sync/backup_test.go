@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/tawanorg/claude-sync/internal/config"
+	"github.com/leog/claude-sync-profiles/internal/config"
 )
 
 // TestCreateBackupSetsRestrictivePermissions verifies that the backup directory
@@ -28,7 +28,7 @@ func TestCreateBackupSetsRestrictivePermissions(t *testing.T) {
 		t.Fatalf("Failed to create helper.json: %v", err)
 	}
 
-	backupDir, err := createBackup(config.SyncPaths)
+	backupDir, err := createBackup(claudeDir, config.SyncPaths)
 	if err != nil {
 		t.Fatalf("createBackup failed: %v", err)
 	}

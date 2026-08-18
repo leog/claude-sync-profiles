@@ -34,12 +34,12 @@ If the update command fails, suggest alternatives:
 
 **npm:**
 ```bash
-npm update -g @tawandotorg/claude-sync
+npm update -g claude-sync-profiles
 ```
 
 **Direct download:**
 ```bash
 # macOS ARM
-curl -L https://github.com/tawanorg/claude-sync/releases/latest/download/claude-sync-darwin-arm64 -o /usr/local/bin/claude-sync
+curl -L https://github.com/leog/claude-sync-profiles/releases/latest/download/claude-sync-darwin-arm64 -o /usr/local/bin/claude-sync
 chmod +x /usr/local/bin/claude-sync
 ```

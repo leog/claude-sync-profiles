@@ -56,6 +56,12 @@ type StorageConfig struct {
 	Provider Provider `yaml:"provider"`
 	Bucket   string   `yaml:"bucket"`
 
+	// Prefix namespaces every remote key under "<prefix>/". It lets multiple
+	// profiles (e.g. personal and work Claude accounts) share one bucket
+	// without their files colliding. Empty (the default) keeps keys at the
+	// bucket root, matching the historical layout.
+	Prefix string `yaml:"prefix,omitempty"`
+
 	// R2/S3 common fields
 	AccessKeyID     string `yaml:"access_key_id,omitempty"`
 	SecretAccessKey string `yaml:"secret_access_key,omitempty"`
