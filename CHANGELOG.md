@@ -1,3 +1,15 @@
+# [1.18.0](https://github.com/leog/claude-sync-profiles/compare/v1.17.1...v1.18.0) (2026-08-20)
+
+
+### Bug Fixes
+
+* pre-pull backup honors excludes and reports progress ([24073f6](https://github.com/leog/claude-sync-profiles/commit/24073f66115c4d7ba19e57827d735d3e7d6df088))
+
+
+### Features
+
+* add multi-account profiles and rebrand as claude-sync-profiles ([f7f4e8e](https://github.com/leog/claude-sync-profiles/commit/f7f4e8e3e0f19c02fa71471c809c6edef84dba01))
+
 ## [1.17.1](https://github.com/tawanorg/claude-sync/compare/v1.17.0...v1.17.1) (2026-07-26)
 
 
