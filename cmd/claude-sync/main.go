@@ -2520,7 +2520,7 @@ func handleFirstPullWithExistingFiles(ctx context.Context, syncer *sync.Syncer, 
 	switch choice {
 	case 0:
 		// Backup and proceed
-		backupDir, err := createBackup(syncer.ClaudeDir(), syncer.SyncPaths())
+		backupDir, err := createBackup(syncer.ClaudeDir(), syncer.SyncPaths(), syncer.IsExcluded)
 		if err != nil {
 			return fmt.Errorf("failed to create backup: %w", err)
 		}
@@ -2540,8 +2540,11 @@ func handleFirstPullWithExistingFiles(ctx context.Context, syncer *sync.Syncer, 
 	}
 }
 
-// createBackup creates a backup of the given Claude directory
-func createBackup(claudeDir string, syncPaths []string) (string, error) {
+// createBackup creates a backup of the given Claude directory. It skips the
+// same excluded paths sync skips (isExcluded may be nil) so a large excluded
+// tree like plugins/ never gets copied, and it reports progress: without it a
+// big backup looks like a hang.
+func createBackup(claudeDir string, syncPaths []string, isExcluded func(string) bool) (string, error) {
 	timestamp := time.Now().Format("20060102-150405")
 	backupDir := claudeDir + ".backup." + timestamp
 
@@ -2551,11 +2554,16 @@ func createBackup(claudeDir string, syncPaths []string) (string, error) {
 	}
 
 	// Copy all syncable files to backup
-	files, err := sync.GetLocalFiles(claudeDir, syncPaths)
+	files, err := sync.GetLocalFiles(claudeDir, syncPaths, isExcluded)
 	if err != nil {
 		return "", fmt.Errorf("failed to list files: %w", err)
 	}
 
+	if !quiet {
+		fmt.Printf("%s⋯%s Backing up %d files to %s\n", colorDim, colorReset, len(files), backupDir)
+	}
+
+	copied := 0
 	for relPath := range files {
 		srcPath := filepath.Join(claudeDir, relPath)
 		dstPath := filepath.Join(backupDir, relPath)
@@ -2575,6 +2583,14 @@ func createBackup(claudeDir string, syncPaths []string) (string, error) {
 		if err := os.WriteFile(dstPath, data, 0600); err != nil {
 			return "", fmt.Errorf("failed to write %s: %w", relPath, err)
 		}
+
+		copied++
+		if !quiet && copied%500 == 0 {
+			fmt.Printf("\r%s⋯%s Backed up %d/%d files%s", colorDim, colorReset, copied, len(files), strings.Repeat(" ", 10))
+		}
+	}
+	if !quiet && copied >= 500 {
+		fmt.Printf("\r%s⋯%s Backed up %d/%d files%s\n", colorDim, colorReset, copied, len(files), strings.Repeat(" ", 10))
 	}
 
 	return backupDir, nil

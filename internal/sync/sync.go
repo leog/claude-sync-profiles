@@ -171,6 +171,13 @@ func (s *Syncer) ClaudeDir() string {
 	return s.claudeDir
 }
 
+// IsExcluded reports whether the relative path matches a configured exclude
+// pattern, for callers like the pre-pull backup that must skip exactly what
+// sync itself skips.
+func (s *Syncer) IsExcluded(relPath string) bool {
+	return s.isExcluded(relPath)
+}
+
 func (s *Syncer) log(format string, args ...interface{}) {
 	if !s.quiet {
 		fmt.Printf(format+"\n", args...)
