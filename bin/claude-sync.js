@@ -5,12 +5,12 @@ const path = require("path");
 const fs = require("fs");
 
 const PLATFORM_PACKAGES = {
-  "darwin-arm64": "@tawandotorg/claude-sync-darwin-arm64",
-  "darwin-x64": "@tawandotorg/claude-sync-darwin-x64",
-  "linux-arm64": "@tawandotorg/claude-sync-linux-arm64",
-  "linux-x64": "@tawandotorg/claude-sync-linux-x64",
-  "win32-arm64": "@tawandotorg/claude-sync-win32-arm64",
-  "win32-x64": "@tawandotorg/claude-sync-win32-x64",
+  "darwin-arm64": "claude-sync-profiles-darwin-arm64",
+  "darwin-x64": "claude-sync-profiles-darwin-x64",
+  "linux-arm64": "claude-sync-profiles-linux-arm64",
+  "linux-x64": "claude-sync-profiles-linux-x64",
+  "win32-arm64": "claude-sync-profiles-win32-arm64",
+  "win32-x64": "claude-sync-profiles-win32-x64",
 };
 
 function getBinaryPath() {
@@ -44,7 +44,7 @@ function getBinaryPath() {
 
   console.error(`Error: claude-sync binary not found for ${platformKey}.`);
   console.error(`The platform package ${packageName} may not be installed.`);
-  console.error("Try reinstalling: npm install -g @tawandotorg/claude-sync");
+  console.error("Try reinstalling: npm install -g claude-sync-profiles");
   process.exit(1);
 }
 

@@ -38,7 +38,7 @@ command -v claude-sync
 
 If not installed, tell the user to install it first:
 ```bash
-npm install -g @tawandotorg/claude-sync
+npm install -g claude-sync-profiles
 ```
 
 ## Configuration Flow

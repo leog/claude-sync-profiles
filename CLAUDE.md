@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository Purpose
 
-`claude-sync` is a Go CLI that syncs `~/.claude/` (Claude Code state: sessions, agents, skills, plugins, settings, history, global `CLAUDE.md`) across devices via encrypted cloud storage (Cloudflare R2 / AWS S3 / GCS). Files are gzip-compressed, then age-encrypted before upload. The canonical binary is distributed as pre-compiled platform-specific npm packages; a tiny Node wrapper at `bin/claude-sync.js` dispatches to the right binary.
+`claude-sync-profiles` (a standalone fork of [tawanorg/claude-sync](https://github.com/tawanorg/claude-sync); the CLI binary is still named `claude-sync`) is a Go CLI that syncs `~/.claude/` (Claude Code state: sessions, agents, skills, plugins, settings, history, global `CLAUDE.md`) across devices via encrypted cloud storage (Cloudflare R2 / AWS S3 / GCS). Files are gzip-compressed, then age-encrypted before upload. The canonical binary is distributed as pre-compiled platform-specific npm packages; a tiny Node wrapper at `bin/claude-sync.js` dispatches to the right binary.
+
+The fork's headline feature is **multi-account profiles**: a global `--profile <name>` flag (or `$CLAUDE_SYNC_PROFILE`) switches every path lookup to `~/.claude-sync/profiles/<name>/` (own config.yaml/state.json/age-key.txt), a per-profile `claude_dir` config field selects which Claude directory is synced (e.g. `~/.claude-personal`), and an optional `storage.prefix` namespaces remote keys so profiles can share one bucket. The default profile (no flag) behaves exactly like upstream.
 
 ## Common Commands
 
@@ -36,22 +38,27 @@ Layered, with a pluggable storage abstraction:
 - **Sync layer** — `internal/sync/`. `Syncer` orchestrates push/pull; `SyncState` (`state.json`) tracks per-file SHA256 hash + size + mtime + last-uploaded time. `DetectChanges` compares local files against state to produce `add/modify/delete` work items. Push/pull both run uploads/downloads with a worker pool (`defaultWorkers = 10`).
 - **Crypto layer** — `internal/crypto/encrypt.go`. Wraps `filippo.io/age` (X25519 + ChaCha20-Poly1305). Supports two key modes: random (`GenerateKey`) or passphrase-derived (`GenerateKeyFromPassphrase`, Argon2id with a **fixed salt** `sha256("claude-sync-v1")` so the same passphrase yields the same key on any device). The derived 32 bytes are clamped for X25519 then Bech32-encoded as an `AGE-SECRET-KEY-…` identity.
 - **Storage layer** — `internal/storage/`. `Storage` interface (`Upload`/`Download`/`Delete`/`DeleteBatch`/`List`/`Head`/`BucketExists`) with three adapters: `r2/` (AWS SDK v2 pointed at `<account>.r2.cloudflarestorage.com`), `s3/` (AWS SDK v2), `gcs/` (Google Cloud Storage SDK). Adapters **self-register** via `init()` functions setting package-level `storage.NewR2` / `NewS3` / `NewGCS` vars; `cmd/claude-sync/main.go` blank-imports them to wire up the factory (`storage.New`). Add new providers by following this pattern.
-- **Config layer** — `internal/config/config.go`. YAML at `~/.claude-sync/config.yaml` (perms 0600). Supports both new unified `storage:` block and legacy R2-only top-level fields — `GetStorageConfig()` handles migration. `SyncPaths` defines what gets synced under `~/.claude/`; edit there to change the sync scope.
+- **Config layer** — `internal/config/config.go`. YAML at `~/.claude-sync/config.yaml` (perms 0600), or `~/.claude-sync/profiles/<name>/config.yaml` when a profile is active (`SetActiveProfile` / package-level `activeProfile`; all path helpers like `ConfigDirPath`/`StateFilePath`/`AgeKeyFilePath` are profile-aware). Supports both new unified `storage:` block and legacy R2-only top-level fields — `GetStorageConfig()` handles migration. `SyncPaths` defines what gets synced under the profile's Claude dir; `claude_dir` overrides which directory that is (`ResolveClaudeDir()`/`ResolveClaudeJSONPath()`).
 
 ### On-disk layout
 
 ```
-~/.claude-sync/         # tool's own state (perms 0600/0700)
-├── config.yaml         # storage + encryption config
+~/.claude-sync/         # default profile's state (perms 0600/0700)
+├── config.yaml         # storage + encryption config (+ optional claude_dir)
 ├── age-key.txt         # encryption identity (derived or random)
-└── state.json          # per-file hash/size/mtime + last push/pull times
+├── state.json          # per-file hash/size/mtime + last push/pull times
+└── profiles/<name>/    # named profiles: same three files per profile
+    ├── config.yaml
+    ├── age-key.txt
+    └── state.json
 
-~/.claude/              # what gets synced (see config.SyncPaths)
+~/.claude/              # what the default profile syncs (see config.SyncPaths)
+~/.claude-personal/     # e.g. what a "personal" profile syncs (claude_dir)
 ```
 
 ### Sync semantics
 
-- **Remote keys** are local paths with `.age` appended. Files under `_external/` on remote are reserved for MCP sync (see below) and are filtered out of regular pull/diff.
+- **Remote keys** are local paths with `.age` appended. Files under `_external/` on remote are reserved for MCP sync (see below) and are filtered out of regular pull/diff. When `storage.prefix` is set, `storage.New` wraps the adapter in a prefixing decorator (`internal/storage/prefix.go`) so every key — including List for pull/diff/reset — is transparently namespaced under `<prefix>/`; profiles sharing a bucket can never touch each other's files.
 - **Push** encrypts only files whose current hash differs from state; deletions detected from state are batched via `DeleteBatch`.
 - **Pull** downloads when the local file is missing, or when remote `LastModified` is after the state's `Uploaded` time. If the local hash **also** differs from state (both sides changed), it's a **conflict**: local is kept, remote is written to `<path>.conflict.<timestamp>`. `claude-sync conflicts` resolves them (and updates state on resolution).
 - **First pull with existing local files** is handled specially in `cmd/claude-sync/main.go` (`handleFirstPullWithExistingFiles`): shows a preview diff and offers backup-to-`~/.claude.backup.<ts>`/overwrite/abort.
@@ -60,7 +67,7 @@ Layered, with a pluggable storage abstraction:
 
 ### MCP sync
 
-`~/.claude.json` holds global MCP server configs. Unlike regular sync, MCP uses a **three-way merge** (`internal/sync/mcp.go`) against a baseline stored in `SyncState.MCPBaseline`. On pull, local vs remote vs baseline are merged; conflicting server entries keep local. Paths inside MCP server commands/args are home-relative-normalized (`NormalizeMCPServers`) before upload and resolved back to absolute on pull. Remote key is fixed: `_external/mcp-servers.json.age`. Toggle via `mcp_sync: true` in config or the `--include-mcp` flag.
+`~/.claude.json` holds global MCP server configs (for a profile with a custom `claude_dir`, it's `<claude_dir>/.claude.json`, matching `CLAUDE_CONFIG_DIR` semantics — see `ResolveClaudeJSONPath`). Unlike regular sync, MCP uses a **three-way merge** (`internal/sync/mcp.go`) against a baseline stored in `SyncState.MCPBaseline`. On pull, local vs remote vs baseline are merged; conflicting server entries keep local. Paths inside MCP server commands/args are home-relative-normalized (`NormalizeMCPServers`) before upload and resolved back to absolute on pull. Remote key is fixed: `_external/mcp-servers.json.age`. Toggle via `mcp_sync: true` in config or the `--include-mcp` flag.
 
 ## Distribution & release
 

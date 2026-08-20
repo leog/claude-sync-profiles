@@ -43,7 +43,7 @@ for platform in "${!PLATFORM_MAP[@]}"; do
   dst_binary="${BINARY_NAME[$platform]}"
   pkg_dir="$NPM_DIR/$platform"
 
-  echo "Publishing @tawandotorg/claude-sync-${platform}@${VERSION}..."
+  echo "Publishing claude-sync-profiles-${platform}@${VERSION}..."
 
   # Copy binary into package directory
   if [ -f "$ROOT_DIR/bin/$src_binary" ]; then
@@ -69,7 +69,7 @@ for platform in "${!PLATFORM_MAP[@]}"; do
   if npm publish --access public; then
     echo "  Published!"
   else
-    echo "  ERROR: failed to publish @tawandotorg/claude-sync-${platform}@${VERSION}"
+    echo "  ERROR: failed to publish claude-sync-profiles-${platform}@${VERSION}"
     FAILED_PLATFORMS="$FAILED_PLATFORMS $platform"
   fi
 
@@ -78,12 +78,12 @@ for platform in "${!PLATFORM_MAP[@]}"; do
 done
 
 # Publish main package
-echo "Publishing @tawandotorg/claude-sync@${VERSION}..."
+echo "Publishing claude-sync-profiles@${VERSION}..."
 cd "$ROOT_DIR"
 
 # Update optionalDependencies versions
 for platform in "${!PLATFORM_MAP[@]}"; do
-  sed -i.bak "s|\"@tawandotorg/claude-sync-${platform}\": \".*\"|\"@tawandotorg/claude-sync-${platform}\": \"${VERSION}\"|" package.json
+  sed -i.bak "s|\"claude-sync-profiles-${platform}\": \".*\"|\"claude-sync-profiles-${platform}\": \"${VERSION}\"|" package.json
 done
 rm -f package.json.bak
 
@@ -91,9 +91,9 @@ npm version "$VERSION" --no-git-tag-version --allow-same-version 2>/dev/null
 
 ROOT_FAILED=0
 if npm publish --access public; then
-  echo "Published @tawandotorg/claude-sync@${VERSION}!"
+  echo "Published claude-sync-profiles@${VERSION}!"
 else
-  echo "ERROR: failed to publish @tawandotorg/claude-sync@${VERSION}"
+  echo "ERROR: failed to publish claude-sync-profiles@${VERSION}"
   ROOT_FAILED=1
 fi
 
@@ -101,8 +101,8 @@ if [ -n "$FAILED_PLATFORMS" ]; then
   echo
   echo "Platform packages that failed to publish:$FAILED_PLATFORMS"
   echo "A 404 on PUT for a package that has never been published usually means"
-  echo "NPM_TOKEN cannot create new packages in the @tawandotorg scope — grant"
-  echo "the token read/write on the whole scope, not just existing packages."
+  echo "NPM_TOKEN cannot create new packages — use a token with publish"
+  echo "permission for new packages on this account."
 fi
 
 if [ -n "$FAILED_PLATFORMS" ] || [ "$ROOT_FAILED" -eq 1 ]; then

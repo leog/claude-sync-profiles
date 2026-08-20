@@ -474,7 +474,7 @@ When you run `claude-sync update`:
 ```
 ┌─────────────────────────────────────┐
 │  Query GitHub API                    │
-│  GET /repos/tawanorg/claude-sync/   │
+│  GET /repos/leog/claude-sync-profiles/   │
 │      releases/latest                 │
 └─────────────────────────────────────┘
                 │

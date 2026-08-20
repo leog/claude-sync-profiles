@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tawanorg/claude-sync/internal/config"
-	"github.com/tawanorg/claude-sync/internal/crypto"
-	"github.com/tawanorg/claude-sync/internal/storage"
+	"github.com/leog/claude-sync-profiles/internal/config"
+	"github.com/leog/claude-sync-profiles/internal/crypto"
+	"github.com/leog/claude-sync-profiles/internal/storage"
 )
 
 // mockStorage implements storage.Storage in-memory for testing.

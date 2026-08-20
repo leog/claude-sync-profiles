@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/tawanorg/claude-sync/internal/config"
+	"github.com/leog/claude-sync-profiles/internal/config"
 )
 
 // TestCreateBackupSetsRestrictivePermissions verifies that the backup directory
@@ -28,7 +28,7 @@ func TestCreateBackupSetsRestrictivePermissions(t *testing.T) {
 		t.Fatalf("Failed to create helper.json: %v", err)
 	}
 
-	backupDir, err := createBackup(config.SyncPaths)
+	backupDir, err := createBackup(claudeDir, config.SyncPaths, nil)
 	if err != nil {
 		t.Fatalf("createBackup failed: %v", err)
 	}
@@ -60,5 +60,39 @@ func TestCreateBackupSetsRestrictivePermissions(t *testing.T) {
 	}
 	if got := fi.Mode().Perm(); got != 0600 {
 		t.Errorf("Expected backup file mode 0600, got %o", got)
+	}
+}
+
+// TestCreateBackupHonorsExcludes verifies the pre-pull backup skips the same
+// paths sync excludes. Without this, an excluded plugins/ tree full of
+// node_modules gets copied file-by-file and the backup appears to hang.
+func TestCreateBackupHonorsExcludes(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	claudeDir := filepath.Join(tmpHome, ".claude")
+	for _, dir := range []string{"agents", "plugins/cache/node_modules"} {
+		if err := os.MkdirAll(filepath.Join(claudeDir, dir), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(claudeDir, "agents", "keep.json"), []byte("{}"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(claudeDir, "plugins", "cache", "node_modules", "skip.js"), []byte("x"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.Config{Exclude: []string{"plugins"}}
+	backupDir, err := createBackup(claudeDir, config.SyncPaths, cfg.IsExcluded)
+	if err != nil {
+		t.Fatalf("createBackup failed: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(backupDir, "agents", "keep.json")); err != nil {
+		t.Errorf("expected agents/keep.json in backup: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(backupDir, "plugins")); !os.IsNotExist(err) {
+		t.Error("excluded plugins/ tree must not be copied into the backup")
 	}
 }

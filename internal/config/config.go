@@ -4,10 +4,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/bmatcuk/doublestar/v4"
-	"github.com/tawanorg/claude-sync/internal/storage"
+	"github.com/leog/claude-sync-profiles/internal/storage"
 	"gopkg.in/yaml.v3"
 )
 
@@ -16,6 +18,15 @@ const (
 	ConfigFile = "config.yaml"
 	StateFile  = "state.json"
 	AgeKeyFile = "age-key.txt"
+
+	// ProfilesDirName is the subdirectory of ~/.claude-sync that holds named
+	// profiles. Each profile gets its own config.yaml, state.json, and
+	// age-key.txt, so multiple Claude accounts/config dirs can be synced
+	// independently from one machine.
+	ProfilesDirName = "profiles"
+
+	// ProfileEnvVar selects the active profile when the --profile flag is not given.
+	ProfileEnvVar = "CLAUDE_SYNC_PROFILE"
 
 	// MCPRemoteKey is the remote storage key for synced MCP server configs.
 	// The _external/ prefix separates it from ~/.claude/-relative files.
@@ -41,6 +52,12 @@ type Config struct {
 
 	// Common fields
 	EncryptionKey string `yaml:"encryption_key_path"`
+
+	// ClaudeDir is the Claude Code config directory this profile syncs.
+	// Empty means the default ~/.claude. Set it (e.g. ~/.claude-personal) to
+	// sync a secondary account's directory — typically one pointed at by
+	// Claude Code's CLAUDE_CONFIG_DIR. ~ is expanded on load.
+	ClaudeDir string `yaml:"claude_dir,omitempty"`
 
 	// Exclude patterns (glob-style) for paths to skip during sync
 	Exclude []string `yaml:"exclude,omitempty"`
@@ -121,18 +138,111 @@ func ScopedSyncPaths(scope string) []string {
 // ErrNoHomeDir is returned when the user's home directory cannot be determined.
 var ErrNoHomeDir = fmt.Errorf("could not determine home directory (is $HOME set?)")
 
-func ConfigDirPath() string {
-	path, _ := ConfigDirPathE()
-	return path
+// activeProfile is the currently selected profile name. Empty means the
+// default (legacy) profile, which stores its files directly in ~/.claude-sync.
+// Named profiles store theirs in ~/.claude-sync/profiles/<name>/.
+var activeProfile string
+
+// profileNamePattern restricts profile names to filesystem-safe identifiers.
+var profileNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+
+// ValidateProfileName checks that a profile name is safe to use as a directory
+// name. Empty is valid (the default profile).
+func ValidateProfileName(name string) error {
+	if name == "" {
+		return nil
+	}
+	if !profileNamePattern.MatchString(name) {
+		return fmt.Errorf("invalid profile name %q: use letters, digits, '.', '_' or '-' (must start with a letter or digit)", name)
+	}
+	return nil
 }
 
-// ConfigDirPathE returns the config directory path or an error if home dir is unavailable.
-func ConfigDirPathE() (string, error) {
+// SetActiveProfile selects the profile whose config/state/key are used by all
+// subsequent path lookups. Empty selects the default profile (~/.claude-sync).
+func SetActiveProfile(name string) error {
+	if err := ValidateProfileName(name); err != nil {
+		return err
+	}
+	activeProfile = name
+	return nil
+}
+
+// ActiveProfile returns the currently selected profile name ("" = default).
+func ActiveProfile() string {
+	return activeProfile
+}
+
+// BaseConfigDirPathE returns ~/.claude-sync regardless of the active profile.
+func BaseConfigDirPathE() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", ErrNoHomeDir
 	}
 	return filepath.Join(home, ConfigDir), nil
+}
+
+// ProfilesDirPath returns ~/.claude-sync/profiles ("" if home is unavailable).
+func ProfilesDirPath() string {
+	base, err := BaseConfigDirPathE()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(base, ProfilesDirName)
+}
+
+// ProfileConfigDirPath returns the config directory for the given profile name
+// without changing the active profile. Empty name means the default profile.
+func ProfileConfigDirPath(name string) (string, error) {
+	base, err := BaseConfigDirPathE()
+	if err != nil {
+		return "", err
+	}
+	if name == "" {
+		return base, nil
+	}
+	if err := ValidateProfileName(name); err != nil {
+		return "", err
+	}
+	return filepath.Join(base, ProfilesDirName, name), nil
+}
+
+// ListProfiles returns the names of named profiles that have a config.yaml,
+// sorted alphabetically. The default profile is not included.
+func ListProfiles() ([]string, error) {
+	dir := ProfilesDirPath()
+	if dir == "" {
+		return nil, ErrNoHomeDir
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to list profiles: %w", err)
+	}
+	var names []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(dir, e.Name(), ConfigFile)); err == nil {
+			names = append(names, e.Name())
+		}
+	}
+	sort.Strings(names)
+	return names, nil
+}
+
+func ConfigDirPath() string {
+	path, _ := ConfigDirPathE()
+	return path
+}
+
+// ConfigDirPathE returns the active profile's config directory path, or an
+// error if the home dir is unavailable.
+func ConfigDirPathE() (string, error) {
+	return ProfileConfigDirPath(activeProfile)
 }
 
 func ConfigFilePath() string {
@@ -170,6 +280,33 @@ func ClaudeJSONPath() string {
 	return filepath.Join(home, ".claude.json")
 }
 
+// ResolveClaudeDir returns the Claude directory this config syncs:
+// the test override if set, then the configured claude_dir, then ~/.claude.
+func (c *Config) ResolveClaudeDir() string {
+	if c.ClaudeDirOverride != "" {
+		return c.ClaudeDirOverride
+	}
+	if c.ClaudeDir != "" {
+		return c.ClaudeDir
+	}
+	return ClaudeDir()
+}
+
+// ResolveClaudeJSONPath returns the path of the .claude.json file holding
+// global MCP servers for this config's Claude directory. For the default
+// ~/.claude it is ~/.claude.json; for a custom claude_dir it lives inside
+// that directory (matching Claude Code's CLAUDE_CONFIG_DIR behavior).
+func (c *Config) ResolveClaudeJSONPath() string {
+	if c.ClaudeJSONOverride != "" {
+		return c.ClaudeJSONOverride
+	}
+	dir := c.ResolveClaudeDir()
+	if def := ClaudeDir(); dir == "" || dir == def {
+		return ClaudeJSONPath()
+	}
+	return filepath.Join(dir, ".claude.json")
+}
+
 func Load() (*Config, error) {
 	configPath := ConfigFilePath()
 
@@ -190,6 +327,12 @@ func Load() (*Config, error) {
 	if cfg.EncryptionKey != "" && cfg.EncryptionKey[0] == '~' {
 		home, _ := os.UserHomeDir()
 		cfg.EncryptionKey = filepath.Join(home, cfg.EncryptionKey[1:])
+	}
+
+	// Expand ~ in claude_dir
+	if cfg.ClaudeDir != "" && cfg.ClaudeDir[0] == '~' {
+		home, _ := os.UserHomeDir()
+		cfg.ClaudeDir = filepath.Join(home, cfg.ClaudeDir[1:])
 	}
 
 	// Expand ~ in path_map keys

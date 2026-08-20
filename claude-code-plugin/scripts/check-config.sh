@@ -5,7 +5,7 @@ CONFIG_FILE="$HOME/.claude-sync/config.yaml"
 KEY_FILE="$HOME/.claude-sync/age-key.txt"
 
 if ! command -v claude-sync &> /dev/null; then
-    echo "claude-sync is not installed. Install with: npm install -g @tawandotorg/claude-sync"
+    echo "claude-sync is not installed. Install with: npm install -g claude-sync-profiles"
     exit 0
 fi
 

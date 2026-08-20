@@ -1,32 +1,43 @@
 <div align="center">
 
+# claude-sync-profiles
+
 <img src="assets/banner.svg" alt="Claude Sync" width="100%">
 
 <br>
 
-*Encrypted with [age](https://github.com/FiloSottile/age) • R2 / S3 / GCS / WebDAV supported*
+*Encrypted with [age](https://github.com/FiloSottile/age) • R2 / S3 / GCS / WebDAV supported • Multi-account profiles*
 
-[![Release](https://img.shields.io/github/v/release/tawanorg/claude-sync)](https://github.com/tawanorg/claude-sync/releases)
+[![Release](https://img.shields.io/github/v/release/leog/claude-sync-profiles)](https://github.com/leog/claude-sync-profiles/releases)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![npm](https://img.shields.io/npm/v/@tawandotorg/claude-sync)](https://www.npmjs.com/package/@tawandotorg/claude-sync)
-[![Socket Badge](https://badge.socket.dev/npm/package/@tawandotorg/claude-sync/1.11.1)](https://badge.socket.dev/npm/package/@tawandotorg/claude-sync/1.11.1)
+[![npm](https://img.shields.io/npm/v/claude-sync-profiles)](https://www.npmjs.com/package/claude-sync-profiles)
 
-[Quick Start](#quick-start) • [Setup Guide](#setup-guide) • [Commands](#commands) • [Shell Integration](#shell-integration) • [Security](#security)
+[Quick Start](#quick-start) • [Multiple Accounts](#multiple-claude-accounts-profiles) • [Setup Guide](#setup-guide) • [Commands](#commands) • [Security](#security)
 
 </div>
 
 ---
 
+> **This is a fork.** `claude-sync-profiles` is a standalone fork of
+> [tawanorg/claude-sync](https://github.com/tawanorg/claude-sync), which does all
+> the heavy lifting of encrypted cross-device sync — full credit to its authors.
+> This fork adds **multi-account support (profiles)**: sync several Claude
+> config directories (e.g. `~/.claude` for work and `~/.claude-personal` for
+> personal) independently from the same machine, to the same or different
+> buckets. See [Multiple Claude accounts](#multiple-claude-accounts-profiles).
+
 ## Features
 
 - **Cross-device sync**: Continue Claude Code conversations on any laptop
+- **Multi-account profiles** *(this fork)*: sync `~/.claude` and `~/.claude-personal` (or any `CLAUDE_CONFIG_DIR`) side by side, each with its own storage config, encryption key, and sync state
+- **Shared-bucket namespacing** *(this fork)*: an optional remote key prefix lets several profiles share a single bucket without colliding
 - **Multi-provider storage**: Cloudflare R2, AWS S3, Google Cloud Storage, S3-compatible (Backblaze B2, MinIO, Wasabi), or WebDAV (Nextcloud, ownCloud)
 - **End-to-end encryption**: All files encrypted with age before upload
 - **Passphrase-based keys**: Same passphrase = same key on any device (no file copying)
 - **Selective sync**: Choose `--scope sessions` to sync only conversation data (skip plugins/node_modules)
 - **Interactive wizard**: Arrow-key driven setup with validation
 - **Secure self-updating**: `claude-sync update` downloads and verifies SHA256 checksums
-- **Simple CLI**: `push`, `pull`, `status`, `diff`, `conflicts` commands
+- **Simple CLI**: `push`, `pull`, `status`, `diff`, `conflicts`, `profiles` commands
 - **Compression**: Gzip compression before encryption for faster syncs
 - **Shell integration**: Optional shell hooks for automatic push/pull
 
@@ -40,7 +51,7 @@
 
 ```bash
 # Install
-npm install -g @tawandotorg/claude-sync
+npm install -g claude-sync-profiles
 
 # Set up (interactive wizard)
 claude-sync init
@@ -53,7 +64,7 @@ claude-sync push
 
 ```bash
 # Install
-npm install -g @tawandotorg/claude-sync
+npm install -g claude-sync-profiles
 
 # Set up with SAME storage credentials
 claude-sync init
@@ -71,6 +82,98 @@ claude-sync pull
 ```
 
 **Same passphrase = same encryption key.** The init verifies your passphrase can decrypt remote files before completing.
+
+## Multiple Claude accounts (profiles)
+
+If you run more than one Claude account on a machine — say **work** in the
+default `~/.claude` and **personal** in `~/.claude-personal` (pointed at by
+Claude Code's `CLAUDE_CONFIG_DIR`) — set up one *profile* per account. Each
+profile has its own storage config, encryption key, sync state, and Claude
+directory:
+
+- **default profile** → `~/.claude-sync/`, syncs `~/.claude` (exactly the pre-fork behavior)
+- **named profile `<name>`** → `~/.claude-sync/profiles/<name>/`, syncs whatever `claude_dir` you configure
+
+### Set up
+
+```bash
+# Work account: default profile, syncs ~/.claude
+claude-sync init
+
+# Personal account: its own profile, syncs ~/.claude-personal
+claude-sync --profile personal init --claude-dir ~/.claude-personal
+```
+
+During a named profile's init you'll also be asked for a **remote key prefix**
+(default: the profile name). The prefix namespaces the profile's files inside
+the bucket, so both accounts can share **one bucket** without colliding — or
+point each profile at a different bucket and leave the prefix empty. Use the
+same prefix for the same profile on every device.
+
+### Daily use
+
+```bash
+claude-sync push                        # default (work) profile
+claude-sync --profile personal push     # personal profile
+claude-sync push --all-profiles         # every configured profile in one go
+claude-sync pull --all-profiles
+
+claude-sync profiles                    # list profiles, dirs, and remotes
+export CLAUDE_SYNC_PROFILE=personal     # or select via environment variable
+```
+
+### On your other computer
+
+Run the same two `init` commands with the same buckets/prefixes and the same
+passphrases, then `claude-sync pull --all-profiles`. Sessions resume on the
+other machine as long as project paths match relative to home (see
+[Cross-Device Path Mapping](#cross-device-path-mapping) when they don't).
+
+### Transparent sync via Claude Code hooks
+
+`claude-sync auto enable` installs Claude Code hooks so syncing happens
+without you thinking about it: a `SessionStart` hook pulls when a session
+begins, and a `Stop` hook pushes when a session finishes. The hooks are
+profile-aware — with `--profile personal` they run
+`claude-sync --profile personal pull/push -q` and are written into
+`~/.claude-personal/settings.json`.
+
+```bash
+# Every project of the work account (default profile)
+claude-sync auto enable
+
+# Every project of the personal account
+claude-sync --profile personal auto enable
+
+# Only one specific project (writes <project>/.claude/settings.local.json)
+claude-sync --profile personal auto enable --project ~/dev/side-project
+
+# Check / remove
+claude-sync auto status
+claude-sync --profile personal auto disable --project ~/dev/side-project
+```
+
+`--project` writes the personal `.claude/settings.local.json` by default (it
+stays out of git); add `--shared` to write the committed `.claude/settings.json`
+so the whole team gets the hooks.
+
+### Notes
+
+- **MCP sync follows the profile**: for a custom `claude_dir`, MCP servers are
+  read from `<claude_dir>/.claude.json` (matching `CLAUDE_CONFIG_DIR`
+  semantics); the default profile keeps using `~/.claude.json`.
+- **Config keys** (per profile, in its `config.yaml`): `claude_dir` selects the
+  synced directory; `storage.prefix` sets the remote key prefix:
+
+  ```yaml
+  storage:
+    provider: r2
+    bucket: claude-sync
+    prefix: personal        # namespace inside the shared bucket
+    # ...credentials...
+  claude_dir: ~/.claude-personal
+  encryption_key_path: ~/.claude-sync/profiles/personal/age-key.txt
+  ```
 
 ## Setup Guide
 
@@ -249,6 +352,7 @@ claude-sync pull        # Download remote changes from cloud storage
 claude-sync status      # Show pending local changes
 claude-sync diff        # Show differences between local and remote
 claude-sync conflicts   # List and resolve conflicts
+claude-sync profiles    # List sync profiles (multi-account)
 claude-sync rebuild-history  # Rebuild ~/.claude/history.jsonl from session files
 claude-sync reset       # Reset configuration (forgot passphrase)
 claude-sync migrate     # Convert legacy remote keys to portable path-mapped keys
@@ -256,6 +360,10 @@ claude-sync update      # Update to latest version (verifies release checksums)
 claude-sync changelog   # Show release history
 claude-sync --help      # Show all commands
 ```
+
+Every command accepts `--profile <name>` (or `$CLAUDE_SYNC_PROFILE`) to operate
+on a named profile; `push` and `pull` also accept `--all-profiles`. See
+[Multiple Claude accounts](#multiple-claude-accounts-profiles).
 
 ### Pull Options
 
@@ -287,6 +395,10 @@ timestamp, and the previous file is kept as `history.jsonl.bak`.
 claude-sync init              # Full setup wizard
 claude-sync init --passphrase # Re-enter passphrase only (keeps storage config)
 claude-sync init --force      # Reset everything, start fresh
+
+# Multi-account (see "Multiple Claude accounts" above)
+claude-sync --profile personal init --claude-dir ~/.claude-personal
+claude-sync --profile personal init --claude-dir ~/.claude-personal --remote-prefix personal
 ```
 
 ### Quiet Mode
@@ -433,10 +545,10 @@ Claude sessions typically use < 50MB. Syncing is effectively **free** on any pro
 
 ```bash
 # Global install
-npm install -g @tawandotorg/claude-sync
+npm install -g claude-sync-profiles
 
 # Or one-time use
-npx @tawandotorg/claude-sync init
+npx claude-sync-profiles init
 ```
 
 ### GitHub Packages
@@ -445,10 +557,10 @@ npx @tawandotorg/claude-sync init
 
 ```bash
 # Add to ~/.npmrc
-echo "@tawanorg:registry=https://npm.pkg.github.com" >> ~/.npmrc
+echo "@leog:registry=https://npm.pkg.github.com" >> ~/.npmrc
 
 # Install
-npm install -g @tawanorg/claude-sync
+npm install -g claude-sync-profiles
 ```
 
 ### Download Binary
@@ -457,19 +569,19 @@ npm install -g @tawanorg/claude-sync
 
 ```bash
 # macOS ARM (M1/M2/M3)
-curl -L https://github.com/tawanorg/claude-sync/releases/latest/download/claude-sync-darwin-arm64 -o claude-sync
+curl -L https://github.com/leog/claude-sync-profiles/releases/latest/download/claude-sync-darwin-arm64 -o claude-sync
 chmod +x claude-sync
 sudo mv claude-sync /usr/local/bin/
 ```
 
-See [GitHub Releases](https://github.com/tawanorg/claude-sync/releases) for all platforms.
+See [GitHub Releases](https://github.com/leog/claude-sync-profiles/releases) for all platforms.
 
 ### Go Install
 
 **Prerequisite:** Go 1.21+ (for developers)
 
 ```bash
-go install github.com/tawanorg/claude-sync/cmd/claude-sync@latest
+go install github.com/leog/claude-sync-profiles/cmd/claude-sync@latest
 ```
 
 ### Build from Source
@@ -477,8 +589,8 @@ go install github.com/tawanorg/claude-sync/cmd/claude-sync@latest
 **Prerequisite:** Go 1.21+
 
 ```bash
-git clone https://github.com/tawanorg/claude-sync
-cd claude-sync
+git clone https://github.com/leog/claude-sync-profiles
+cd claude-sync-profiles
 make build
 ./bin/claude-sync --version
 ```
@@ -492,6 +604,14 @@ make check         # Run all pre-commit checks
 make build-all     # Build for all platforms
 make setup-hooks   # Enable git pre-commit hooks
 ```
+
+## Credits
+
+This project is a fork of [claude-sync](https://github.com/tawanorg/claude-sync)
+by [@tawanorg](https://github.com/tawanorg). All of the core sync, encryption,
+storage, and path-mapping machinery comes from that project; this fork adds
+multi-account profile support and is maintained independently at
+[leog/claude-sync-profiles](https://github.com/leog/claude-sync-profiles).
 
 ## License
 

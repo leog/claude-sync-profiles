@@ -1,19 +1,25 @@
 ---
 layout: default
-title: Claude Sync - Technical Documentation
+title: Claude Sync Profiles - Technical Documentation
 ---
 
-# Claude Sync
+# Claude Sync Profiles
 
-**Encrypted cross-device synchronization for Claude Code sessions**
+**Encrypted cross-device, multi-account synchronization for Claude Code sessions**
 
-[Architecture](./architecture) | [How It Works](./how-it-works) | [Security](./security) | [GitHub](https://github.com/tawanorg/claude-sync)
+[Architecture](./architecture) | [How It Works](./how-it-works) | [Security](./security) | [GitHub](https://github.com/leog/claude-sync-profiles)
 
 ---
 
-## What is Claude Sync?
+> **Fork notice:** Claude Sync Profiles is a standalone fork of
+> [tawanorg/claude-sync](https://github.com/tawanorg/claude-sync) that adds
+> multi-account **profiles**: sync several Claude config directories (e.g.
+> `~/.claude` and `~/.claude-personal`) independently from one machine, to the
+> same or different buckets.
 
-Claude Sync is a CLI tool that enables seamless synchronization of [Claude Code](https://claude.ai/claude-code) conversations, project sessions, and configurations across multiple devices.
+## What is Claude Sync Profiles?
+
+Claude Sync Profiles is a CLI tool that enables seamless synchronization of [Claude Code](https://claude.ai/claude-code) conversations, project sessions, and configurations across multiple devices — for one or several Claude accounts per machine.
 
 ### The Problem
 
@@ -32,6 +38,7 @@ Claude Sync provides:
 | Feature | Description |
 |---------|-------------|
 | **End-to-end encryption** | Files encrypted with [age](https://github.com/FiloSottile/age) before upload |
+| **Multi-account profiles** | Per-profile config, key, state, and Claude dir; share a bucket via a remote key prefix |
 | **Passphrase-based keys** | Same passphrase = same key on any device (no file copying) |
 | **Multi-cloud storage** | Cloudflare R2, Amazon S3, or Google Cloud Storage |
 | **Interactive wizard** | Arrow-key driven setup with validation |
@@ -56,8 +63,8 @@ Claude Sync provides:
 
 ```bash
 # Install (pick one)
-npm install -g @tawandotorg/claude-sync
-# or: go install github.com/tawanorg/claude-sync/cmd/claude-sync@latest
+npm install -g claude-sync-profiles
+# or: go install github.com/leog/claude-sync-profiles/cmd/claude-sync@latest
 
 # Set up (interactive wizard)
 claude-sync init
@@ -70,7 +77,7 @@ claude-sync push
 
 ```bash
 # Install
-npm install -g @tawandotorg/claude-sync
+npm install -g claude-sync-profiles
 
 # Set up with SAME credentials and SAME passphrase
 claude-sync init
@@ -87,36 +94,36 @@ claude-sync pull
 
 ```bash
 # One-time use
-npx @tawandotorg/claude-sync init
+npx claude-sync-profiles init
 
 # Global install
-npm install -g @tawandotorg/claude-sync
+npm install -g claude-sync-profiles
 ```
 
 ### Go Install
 
 ```bash
-go install github.com/tawanorg/claude-sync/cmd/claude-sync@latest
+go install github.com/leog/claude-sync-profiles/cmd/claude-sync@latest
 ```
 
 ### Download Binary
 
-Download from [GitHub Releases](https://github.com/tawanorg/claude-sync/releases):
+Download from [GitHub Releases](https://github.com/leog/claude-sync-profiles/releases):
 
 ```bash
 # macOS ARM (M1/M2/M3)
-curl -L https://github.com/tawanorg/claude-sync/releases/latest/download/claude-sync-darwin-arm64 -o claude-sync
+curl -L https://github.com/leog/claude-sync-profiles/releases/latest/download/claude-sync-darwin-arm64 -o claude-sync
 chmod +x claude-sync
 sudo mv claude-sync /usr/local/bin/
 
 # macOS Intel
-curl -L https://github.com/tawanorg/claude-sync/releases/latest/download/claude-sync-darwin-amd64 -o claude-sync
+curl -L https://github.com/leog/claude-sync-profiles/releases/latest/download/claude-sync-darwin-amd64 -o claude-sync
 
 # Linux AMD64
-curl -L https://github.com/tawanorg/claude-sync/releases/latest/download/claude-sync-linux-amd64 -o claude-sync
+curl -L https://github.com/leog/claude-sync-profiles/releases/latest/download/claude-sync-linux-amd64 -o claude-sync
 
 # Linux ARM64
-curl -L https://github.com/tawanorg/claude-sync/releases/latest/download/claude-sync-linux-arm64 -o claude-sync
+curl -L https://github.com/leog/claude-sync-profiles/releases/latest/download/claude-sync-linux-arm64 -o claude-sync
 ```
 
 ---
@@ -242,4 +249,4 @@ Claude sessions typically use < 50MB. Syncing is effectively **free** on any pro
 
 ## License
 
-MIT License - see [LICENSE](https://github.com/tawanorg/claude-sync/blob/main/LICENSE)
+MIT License - see [LICENSE](https://github.com/leog/claude-sync-profiles/blob/main/LICENSE)

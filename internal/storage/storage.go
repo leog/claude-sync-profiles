@@ -52,24 +52,32 @@ type Storage interface {
 	BucketExists(ctx context.Context) (bool, error)
 }
 
-// New creates a new Storage instance based on the provided configuration
+// New creates a new Storage instance based on the provided configuration.
+// When cfg.Prefix is set, the returned Storage transparently namespaces all
+// keys under that prefix (see WithPrefix).
 func New(cfg *StorageConfig) (Storage, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid storage config: %w", err)
 	}
 
+	var store Storage
+	var err error
 	switch cfg.Provider {
 	case ProviderR2:
-		return NewR2(cfg)
+		store, err = NewR2(cfg)
 	case ProviderS3:
-		return NewS3(cfg)
+		store, err = NewS3(cfg)
 	case ProviderGCS:
-		return NewGCS(cfg)
+		store, err = NewGCS(cfg)
 	case ProviderWebDAV:
-		return NewWebDAV(cfg)
+		store, err = NewWebDAV(cfg)
 	default:
 		return nil, fmt.Errorf("unsupported storage provider: %s", cfg.Provider)
 	}
+	if err != nil {
+		return nil, err
+	}
+	return WithPrefix(store, cfg.Prefix), nil
 }
 
 // NewR2 creates a new R2 storage adapter (implemented in r2/r2.go)
